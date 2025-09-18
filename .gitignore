@@ -1,0 +1,8 @@
+/target
+.history/
+.cargo/
+.DS_Store
+.target/
+
+base.local.toml
+.env

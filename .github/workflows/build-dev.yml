@@ -1,0 +1,128 @@
+name: build dev
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    if: ${{ !contains(github.run_number, '-') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    name: build_and_deploy
+    permissions:
+      contents: write
+    runs-on: [ubuntu-22.04]
+    env:
+      BUILD_TESTS: OFF
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Install Rust-stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          override: true
+
+      - name: Set proxy
+        run: |
+          rm -rf ~/.gitconfig || true
+          git config --global url."https://${{ secrets.GH_ACCESS_TOKEN }}@github.com".insteadOf ssh://git@github.com
+          git config --global credential.helper store
+
+      - name: Building
+        env:
+          RUSTC_WRAPPER: sccache
+        shell: bash
+        run: |
+          unset RUSTFLAGS RUSTC_WRAPPER
+          export LD_LIBRARY_PATH=/usr/local/lib
+          export LIBRARY_PATH=/usr/local/lib
+          cargo build -r
+
+      - name: Get tag
+        shell: bash
+        run: |
+          datetime_now=$(echo $(date "+ %Y%m%d%H%M%S"))
+          echo "DOCKER_TAG=${datetime_now}" >> $GITHUB_ENV
+
+      - name: Log in to Aliyun ACR
+        run: |
+          docker login \
+            -u ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }} \
+            -p ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }} \
+            ${{ secrets.ALI_DOCKER_REGISTRY }}
+
+      - name: Build and push Docker image
+        shell: bash
+        run: |
+          docker build --build-arg APP_PROFILE=dev -t ${{ secrets.ALI_DOCKER_REGISTRY }}/mxrag-dev/wisland-feed-dev:${{ env.DOCKER_TAG }} .
+          docker push ${{ secrets.ALI_DOCKER_REGISTRY }}/mxrag-dev/wisland-feed-dev:${{ env.DOCKER_TAG }}
+
+      - name: Download saectl
+        shell: bash
+        run: |
+          wget https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250314/luedev/saectl-v0.1.5-linux-amd64.tar.gz
+          tar zxf saectl-v0.1.5-linux-amd64.tar.gz
+          sudo mv saectl /usr/bin/
+
+      - name: Restart sae
+        shell: bash
+        env:
+          ALICLOUD_ACCESS_KEY: ${{ secrets.ALICLOUD_ACCESS_KEY_PH }}
+          ALICLOUD_SECRET_KEY: ${{ secrets.ALICLOUD_SECRET_KEY_PH }}
+          ALICLOUD_REGION: ${{ secrets.ALICLOUD_REGION_SINGAPORE_SAE }}
+        run: |
+          saectl set image deploy/wisland-feed-dev main=${{ secrets.ALI_DOCKER_REGISTRY }}/mxrag-dev/wisland-feed-dev:${{ env.DOCKER_TAG }}
+
+      - name: Notify Feishu
+        if: always()
+        shell: bash
+        run: |
+          set -x
+          unset http_proxy
+          unset https_proxy
+          cd ${{ github.workspace }}
+          BUILD_STATUS="${{ job.status }}"
+          # COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s"|awk 'NR==1{for (i=1; i<=NF; i++) printf "%s ", $i; print ""}')
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
+          COMMIT_SHA=$(git log -1 --pretty=format:"%h")
+
+          if [ "$BUILD_STATUS" = "success" ]; then
+            STATUS_TEXT=" Success"
+          else
+            STATUS_TEXT=" Failed"
+          fi
+          curl -H "Content-Type: application/json" -d "{
+            \"msg_type\": \"post\",
+            \"content\": {
+              \"post\": {
+                \"zh_cn\": {
+                  \"title\": \"wisland-feed-dev - ${STATUS_TEXT}\",
+                  \"content\": [
+                    [{\"tag\": \"text\",\"text\": \"Branch: ${{ github.ref_name }}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Commit Message: ${COMMIT_MSG}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Author: ${COMMIT_AUTHOR}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Commit SHA: ${COMMIT_SHA}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Build Status: ${STATUS_TEXT}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Docker Tag: ${{ env.DOCKER_TAG }}\\n\"}]
+                  ]
+                }
+              }
+            }
+          }" https://open.feishu.cn/open-apis/bot/v2/hook/27347fca-da5c-4a26-9e8d-afca409f96c7
+
+          set +x
+
+      - name: Clean workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf ${{ github.workspace }}/*

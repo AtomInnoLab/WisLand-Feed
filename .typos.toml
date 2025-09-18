@@ -1,0 +1,18 @@
+[default]
+extend-ignore-identifiers-re = [
+    "doc_sou.*re_path",
+    "typ",
+    "_seesion_",
+    "builded_dag",
+    "AtomInifinite",
+]
+
+[default.extend-words]
+# builded = "built"
+
+[type.po]
+extend-glob = ["*.po"]
+check-file = false
+
+[files]
+extend-exclude = ["*.lock", "*.toml", "*.log", "eslint.config.js", "*.json"]

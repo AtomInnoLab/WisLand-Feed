@@ -1,0 +1,82 @@
+name = "wisland-feed"
+version = "0.1.0"
+log = "debug,sqlx=off,h2=off,sea_orm=off"
+
+[server]
+host = "0.0.0.0"
+port = 3500
+api_prefix = "/api/v1/feed"
+
+[database]
+url = "postgresql://postgres:testpassword@127.0.0.1:5432/wisland_feed?sslmode=disable"
+allow_migrate = true
+allow_migration_fail = true
+timeout_ms = 5000 # 5s
+idle_timeout_ms = 600_000 # 10 mins
+acquire_timeout_ms = 3000 # 3s
+max_connections = 20
+min_connections = 5
+
+[llm]
+# frequency_penalty =
+temperature = 0.7
+prompt_max_token = 6000
+endpoint = "http://model-wismodel.prod.atominnolab.com/v1"
+model = "WisModel-20250821-8B-strict"
+api_key = "sk-GmE1ci8tMnVzuaOGsPSgLA"
+
+[agent]
+max_history = 10
+plan_suffix = "<|plan|>"
+search_plan_suffix = "<|search|>"
+verifier_user_prompt = "## question:\n{question}\n\n## search result:\n{search_result}"
+
+[search]
+serp_api_key = "fa709c7ccbd9f970e4ad48da07f7ad4e6a6b0ac30e8f50682dba30f8a7d47e02"
+
+[oss]
+access_key_id="access_key_id"
+access_key_secret="access_key_secret"
+bucket="bucket"
+endpoint="endpoint"
+prefix="prefix"
+
+[rss]
+max_prompt_number=10
+max_rss_paper=1000
+redis_prefix="wisland-feed"
+only_log_failed_jobs=true
+
+# Named workers mapping for easier .env override by name
+[rss.workers.verify-papers]
+name = "verify-papers"
+concurrency = 2
+timeout_secs = 3600
+retry = 1
+
+[rss.workers.verify-one-paper-prompt-pair]
+name = "verify-one-paper-prompt-pair"
+concurrency = 2
+timeout_secs = 3600
+retry = 1
+
+[rss.workers.pull-sources]
+name = "pull-sources"
+concurrency = 1
+timeout_secs = 36000
+retry = 1
+cron = "1 * * * * *"
+
+[rss.workers.parse-rss-xml]
+name = "parse-rss-xml"
+concurrency = 1
+timeout_secs = 36000
+retry = 1
+cron = "*/30 * * * * *"
+
+[rss.workers.update-user-interest-metadata]
+name = "update-user-interest-metadata"
+concurrency = 1
+timeout_secs = 36000
+retry = 1
+cron = "@daily"

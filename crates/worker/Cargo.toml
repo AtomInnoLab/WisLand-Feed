@@ -1,0 +1,52 @@
+[package]
+name = "worker"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+feed = { path = "../../../WisAgent/crates/feed" }
+tracing = { workspace = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+
+# conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", features = ["agent_redis"] }
+conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", features = [
+    "agent_redis",
+] }
+
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+sea-orm = { workspace = true }
+bb8 = { workspace = true }
+bb8-redis = { workspace = true }
+redis = { workspace = true }
+apalis = { version = "0.7.1", features = ["retry", "limit", "timeout"] }
+apalis-redis = "0.7.1"
+apalis-sql = { version = "0.7.1", features = [
+    "migrate",
+    "tokio-comp",
+    "postgres",
+] }
+apalis-cron = "0.7.3"
+chrono = { workspace = true }
+rss = "2.0"
+uuid = { workspace = true }
+anyhow = "1"
+
+
+seaorm-db = { path = "../../../WisAgent/crates/seaorm-db", version = "*", package = "seaorm-db", default-features = false, features = [
+    "web",
+] }
+search = { path = "../../../WisAgent/crates/search", version = "*", package = "search", default-features = false, features = [
+    "web",
+] }
+protocol = { path = "../../../WisAgent/crates/protocol", version = "*", package = "protocol", default-features = false, features = [
+    "web",
+    "redis",
+] }
+oss = { path = "../../../WisAgent/crates/oss"}
