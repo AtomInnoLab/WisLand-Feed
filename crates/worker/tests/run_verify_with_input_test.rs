@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use feed::{manager::lib::RedisService, workers::verify_user_papers::run_verify_with_input};
+use feed::workers::{base::RedisService, verify_user_papers::run_verify_with_input};
 use protocol::tasks::verify::Criteria;
 use seaorm_db::connection::get_db;
 use search::web::scholar::paper::{Paper, PaperSource};
@@ -51,6 +51,7 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
 
     // build a minimal Paper input
     let paper = Paper::builder()
+        .id("1")
         .title("Test Paper about Large Language Models")
         .authors(vec!["Alice".to_string(), "Bob".to_string()])
         .year(None)
@@ -62,6 +63,7 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
         .source(PaperSource::GoogleScholar)
         .uuid(Uuid::new_v4())
         .venue(Some("Nowhere 2025".to_string()))
+        .pdf_url(Some("https://example.com/paper.pdf".to_string()))
         .build();
     info!(title = %paper.title, authors = %paper.authors.join(", "), venue = ?paper.venue, url = ?paper.url, "constructed paper input");
 

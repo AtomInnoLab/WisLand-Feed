@@ -12,6 +12,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
+dotenvy = "0.15.7"
 
 # conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", features = ["agent_redis"] }
 conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", features = [

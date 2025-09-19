@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use conf::config::{AppConfig, app_config};
-use protocol::context::manager::ChatManager;
 use sea_orm::DatabaseConnection;
 use seaorm_db::connection::get_db;
 use tokio::signal::{self, unix::SignalKind};
@@ -12,7 +11,6 @@ use tracing::*;
 pub struct AppState {
     pub conn: DatabaseConnection,
     pub redis: RedisService,
-    pub chat_manager: ChatManager,
     pub config: Arc<AppConfig>,
 }
 
@@ -32,7 +30,6 @@ impl AppState {
                     .await
                     .expect("Could not connect redis"),
             },
-            chat_manager: ChatManager::default(),
             config,
         }
     }
@@ -57,11 +54,6 @@ pub async fn graceful_shutdown(state: AppState) {
             info!("Received SIGTERM, shutting down...");
         } => {}
     }
-
-    // wait for all tasks to finish
-    info!("canceling all completion tasks...");
-    let _ = state.chat_manager.cancel_all_tasks().await;
-    info!("all completions tasks canceled");
 
     info!("Bye");
 }

@@ -1,9 +1,11 @@
 use conf::config::app_config;
+use dotenvy::dotenv;
 use feed::manager;
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
     // 加载配置并输出关键启动信息
     let cfg = app_config();
     info!(target: "feed", redis_prefix = %cfg.rss.redis_prefix, "Starting feed workers");

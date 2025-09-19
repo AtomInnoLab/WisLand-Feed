@@ -75,3 +75,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rust-embed = "8"
 base64 = "0.22"
 quick-xml = { version = "0.38", features = ["serialize"] }
+
+
+
+dotenvy = "0.15.7"

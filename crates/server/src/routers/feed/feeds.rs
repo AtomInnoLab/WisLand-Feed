@@ -137,7 +137,7 @@ pub async fn verify(
     )
     .await
     .map_err(|e| ApiError::CustomError {
-        message: format!("verify-papers: {e}"),
+        message: format!("verify_papers: {e}"),
         code: ApiCode::COMMON_FEED_ERROR,
     })?;
     Ok(ApiResponse::data(true))
@@ -170,7 +170,7 @@ pub async fn verify_detail(
         .get_job_detail()
         .await
         .map_err(|e| ApiError::CustomError {
-            message: format!("verify-papers-detail: {e}"),
+            message: format!("verify_papers-detail: {e}"),
             code: ApiCode::COMMON_FEED_ERROR,
         })?;
 

@@ -48,34 +48,48 @@ redis_prefix="wisland-feed"
 only_log_failed_jobs=true
 
 # Named workers mapping for easier .env override by name
-[rss.workers.verify-papers]
-name = "verify-papers"
+[rss.workers.verify_papers]
+name = "verify_papers"
 concurrency = 2
 timeout_secs = 3600
 retry = 1
 
-[rss.workers.verify-one-paper-prompt-pair]
-name = "verify-one-paper-prompt-pair"
+[rss.workers.verify_one_paper_prompt_pair]
+name = "verify_one_paper_prompt_pair"
 concurrency = 2
 timeout_secs = 3600
 retry = 1
 
-[rss.workers.pull-sources]
-name = "pull-sources"
+[rss.workers.pull_sources]
+name = "pull_sources"
 concurrency = 1
 timeout_secs = 36000
 retry = 1
 cron = "1 * * * * *"
 
-[rss.workers.parse-rss-xml]
-name = "parse-rss-xml"
+[rss.workers.parse_rss_xml]
+name = "parse_rss_xml"
 concurrency = 1
 timeout_secs = 36000
 retry = 1
 cron = "*/30 * * * * *"
 
-[rss.workers.update-user-interest-metadata]
-name = "update-user-interest-metadata"
+[rss.workers.update_user_interest_metadata]
+name = "update_user_interest_metadata"
+concurrency = 1
+timeout_secs = 36000
+retry = 1
+cron = "@daily"
+
+[rss.workers.update_user_interest_metadata_once]
+name = "update_user_interest_metadata_once"
+concurrency = 2
+timeout_secs = 36000
+retry = 1
+
+
+[rss.workers.download_rss_source_files]
+name = "download_rss_source_files"
 concurrency = 1
 timeout_secs = 36000
 retry = 1

@@ -1,8 +1,8 @@
-use std::io::{BufRead, Cursor};
+use std::io::Cursor;
 
 use conf::config::app_config;
+use dotenvy::dotenv;
 use feed::parsers::{arxiv::ArxivParser, base::Parser};
-use std::{sync::Arc, time::Duration};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -18,6 +18,7 @@ fn init_test_tracing() {
             .with_writer(std::io::stderr)
             .compact()
             .try_init();
+        dotenv().ok();
     });
 }
 
@@ -41,7 +42,11 @@ async fn test_arxiv_parser_minimal_rss_ok() -> Result<(), Box<dyn std::error::Er
     );
     let papers = result.unwrap();
     info!(count = papers.len(), "ArxivParser returned papers vector");
-    assert_eq!(papers.len(), 0, "Current implementation returns empty list");
+    assert_eq!(
+        papers.len(),
+        35,
+        "Current implementation returns empty list"
+    );
     Ok(())
 }
 
