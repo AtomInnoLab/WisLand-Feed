@@ -16,7 +16,7 @@ async fn test_metadata_from_interest_returns_json_or_empty()
         .compact()
         .try_init();
 
-    let db = get_db().await.clone();
+    let _db = get_db().await.clone();
 
     let redis_url = std::env::var("REDIS_URL")
         .or_else(|_| std::env::var("APP_AGENT_REDIS__URL"))

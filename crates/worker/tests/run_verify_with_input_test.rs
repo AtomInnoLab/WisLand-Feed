@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use feed::workers::{base::RedisService, verify_user_papers::run_verify_with_input};
 use protocol::tasks::verify::Criteria;

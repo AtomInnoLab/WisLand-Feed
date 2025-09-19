@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
-use feed::redis::{JobDetail, VerifyJob};
+use feed::redis::verify_job::{JobDetail, VerifyJob};
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use seaorm_db::entities::web::feed::user_paper_verifications;
 use seaorm_db::entities::web::sea_orm_active_enums::VerificationMatch;

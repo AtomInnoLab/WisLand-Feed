@@ -41,7 +41,7 @@ impl FromRef<AppState> for DatabaseConnection {
     }
 }
 
-pub async fn graceful_shutdown(state: AppState) {
+pub async fn graceful_shutdown(_state: AppState) {
     // Wait for Ctrl+C signal
     tokio::select! {
         _ = signal::ctrl_c() => {
