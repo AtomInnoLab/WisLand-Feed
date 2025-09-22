@@ -5,18 +5,25 @@ edition = "2024"
 
 
 [dependencies]
-feed = { path = "../../../WisAgent/crates/feed" }
+# feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "feed", default-features = false, features = [
+#     "web",
+# ] }
+# conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", features = ["agent_redis"] }
+
 tracing = { workspace = true }
 
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
-dotenvy = "0.15.7"
+dotenvy = { workspace = true }
 
-# conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", features = ["agent_redis"] }
-conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", features = [
+
+conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", default-features = false, features = [
     "agent_redis",
+] }
+feed = { path = "../../../WisAgent/crates/feed", version = "*", package = "feed", default-features = false, features = [
+    "web",
 ] }
 
 
@@ -39,6 +46,20 @@ rss = "2.0"
 uuid = { workspace = true }
 anyhow = "1"
 
+# seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "seaorm-db", default-features = false, features = [
+#     "web",
+# ] }
+# search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "search", default-features = false, features = [
+#     "web",
+# ] }
+# protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "protocol", default-features = false, features = [
+#     "web",
+#     "redis"
+# ] }
+# oss = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "oss" }
+
+
+
 
 seaorm-db = { path = "../../../WisAgent/crates/seaorm-db", version = "*", package = "seaorm-db", default-features = false, features = [
     "web",
@@ -50,4 +71,4 @@ protocol = { path = "../../../WisAgent/crates/protocol", version = "*", package 
     "web",
     "redis",
 ] }
-oss = { path = "../../../WisAgent/crates/oss"}
+oss = { path = "../../../WisAgent/crates/oss", version = "*", package = "oss", default-features = false }

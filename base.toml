@@ -57,7 +57,7 @@ retry = 1
 [rss.workers.verify_one_paper_prompt_pair]
 name = "verify_one_paper_prompt_pair"
 concurrency = 2
-timeout_secs = 3600
+timeout_secs = 600
 retry = 1
 
 [rss.workers.pull_sources]
@@ -84,7 +84,7 @@ cron = "@daily"
 [rss.workers.update_user_interest_metadata_once]
 name = "update_user_interest_metadata_once"
 concurrency = 2
-timeout_secs = 36000
+timeout_secs = 600
 retry = 1
 
 
