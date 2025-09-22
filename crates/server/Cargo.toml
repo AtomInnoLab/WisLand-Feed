@@ -73,4 +73,6 @@ seaorm-db = { path = "../../../WisAgent/crates/seaorm-db", version = "*", packag
 mxagent = { path = "../../../WisAgent/crates/mxagent", version = "*", package = "mxagent", default-features = false, features = [
     "search_web",
 ] }
-feed = { path = "../../../WisAgent/crates/feed" }
+feed = { path = "../../../WisAgent/crates/feed", version = "*", package = "feed", default-features = false, features = [
+    "web",
+] }
