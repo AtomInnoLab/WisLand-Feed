@@ -13,6 +13,32 @@ use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state:
 
 use super::FEED_TAG;
 
+pub enum RssNode {
+    Leaf(rss_sources::Model),
+    Branch(RssTreeResponse),
+}
+
+pub struct RssTreeResponse {
+    pub name: String,
+    pub children: HashMap<String, RssNode>,
+}
+
+pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTreeResponse {
+    let mut tree = RssTreeResponse {
+        name: "".to_string(),
+        children: HashMap::new(),
+    };
+    for rss_source in rss_sources {
+        let levels = vec![rss_source.channel];
+        levels.extend(rss_source.name.split('|'));
+        for level in levels {
+            while let Some(node) = tree.children.get_mut(level) {}
+        }
+        levels
+    }
+    tree
+}
+
 #[utoipa::path(
     get,
     path = "/rss",
