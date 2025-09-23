@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: wisland-feed-dev-server
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:server-20250920200550
+          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:server-20250923133527
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3500
@@ -49,25 +49,33 @@ spec:
           resources:
             limits:
               cpu: 0.5
-              memory: 512Mi
+              memory: 1Gi
             requests:
               cpu: 0.5
-              memory: 512Mi
+              memory: 1Gi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-dev
+              subPath: .env
 
         - name: wisland-feed-dev-worker
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:worker-20250920200550
+          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:worker-20250923133527
           imagePullPolicy: IfNotPresent
           resources:
             limits:
               cpu: 0.5
-              memory: 512Mi
+              memory: 1Gi
             requests:
               cpu: 0.5
-              memory: 512Mi
+              memory: 1Gi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-dev
+              subPath: .env
 
       dnsPolicy: ClusterFirst
       nodeSelector:
@@ -90,3 +98,8 @@ spec:
         - effect: NoSchedule
           key: virtual-kubelet.io/provider
           operator: Exists
+      volumes:
+        - name: volume-wisland-feed-dev
+          secret:
+            defaultMode: 420
+            secretName: wisland-feed-dev
