@@ -74,8 +74,8 @@ jobs:
       - name: Build and Push Docker Image
         run: |
           sudo apt-get update && sudo apt-get install -y retry
-          docker build -f Dockerfile.server -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }} .
-          docker build -f Dockerfile.worker -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }} .
+          docker build --build-arg APP_PROFILE=dev -f Dockerfile.server -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }} .
+          docker build --build-arg APP_PROFILE=dev -f Dockerfile.worker -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }} .
           retry -t 5 -- docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }}
           retry -t 5 -- docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }}
 
