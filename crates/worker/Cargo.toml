@@ -19,7 +19,7 @@ conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", 
     "agent_redis",
 ] }
 feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", package = "feed", default-features = false, features = [
-    "feed",
+    "redis",
 ] }
 
 
