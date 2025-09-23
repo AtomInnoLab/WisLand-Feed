@@ -89,7 +89,7 @@ jobs:
         run: |
           kubectl -n "${{ env.NAMESPACE }}" set image deployment/${{ env.DEPLOYMENT }} \
             ${{ env.DEPLOYMENT }}-server=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }} \
-            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }}
+            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }}
 
       - name: Notify Feishu - update
         uses: ./.github/actions/send-feishu
