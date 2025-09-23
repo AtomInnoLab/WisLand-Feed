@@ -30,7 +30,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-    - host: wisland-feed-dev.wispaper.inner
+    - host: wisland-feed.wispaperdev.inner
       http:
         paths:
           - path: /

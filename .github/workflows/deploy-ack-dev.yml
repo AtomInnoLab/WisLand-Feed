@@ -112,5 +112,5 @@ jobs:
         with:
           webhook: ${{ env.FEISHU_WEBHOOK_URL_DEV }}
           status-emoji: "🔴"
-          title: "ACK: ${{ env.DEPLOYMENT }} deployment failed"
+          title: "ACK: ${{ env.DEPLOYMENT }} failed"
           details: "仓库: ${{ github.repository }}%0A分支: ${{ github.ref_name }}%0A提交: ${{ github.sha }}"
