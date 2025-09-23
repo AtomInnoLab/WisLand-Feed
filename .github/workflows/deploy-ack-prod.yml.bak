@@ -1,0 +1,213 @@
+name: deploy_ali_ack-prod
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  KUBECTL_VERSION: v1.32.2
+  NAMESPACE: prod-ns
+  REPO_NS: mxrag
+  DEPLOYMENT: nginx-model-prod
+
+  REPO: ${{ secrets.ALI_DOCKER_REGISTRY }}
+  REPO_USER: ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }}
+  REPO_PASSWD: ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }}
+  FEISHU_WEBHOOK_URL_PROD: ${{ secrets.FEISHU_WEBHOOK_URL_PROD }}
+  KUBECONFIG_PROD: ${{ secrets.KUBECONFIG_PROD }}
+
+jobs:
+  build_and_push:
+    # 仅在以下情况运行：
+    # 2. PR 合并到 prod（github.event_name == 'pull_request_target' 且 merged == true）
+    # 3. 手动触发（github.event_name == 'workflow_dispatch'）
+    if: |
+      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
+    name: build_and_push
+    permissions:
+      contents: write
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Docker Tag
+        id: docker_tag
+        run: |
+          datetime_now=$(TZ='Asia/Shanghai' date "+%Y%m%d%H%M%S")
+          echo "DOCKER_TAG=${datetime_now}" >> $GITHUB_ENV
+          echo "tag=${datetime_now}" >> $GITHUB_OUTPUT
+
+      - name: Log in to Aliyun ACR
+        run: |
+          docker login \
+            -u ${{ env.REPO_USER }} \
+            -p ${{ env.REPO_PASSWD }} \
+            ${{ env.REPO }}
+
+      - name: Build and Push Docker Image
+        run: |
+          sudo apt-get update && sudo apt-get install -y retry
+          docker build -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ env.DOCKER_TAG }} .
+          retry -t 5 -- \
+            docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ env.DOCKER_TAG }}
+
+      - name: Set DOCKER_TAG for next job
+        run: |
+          echo "Image built: ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ env.DOCKER_TAG }}"
+    outputs:
+      docker_tag: ${{ steps.docker_tag.outputs.tag }}
+
+  deploy_to_canary:
+    needs: build_and_push
+    name: deploy_to_canary
+    permissions:
+      contents: write
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: ./.github/actions/setup-kubectl-ack
+        with:
+          kubectl-version: ${{ env.KUBECTL_VERSION }}
+          kubeconfig-env: ${{ env.KUBECONFIG_PROD }}
+
+      - name: Apply canary
+        shell: bash
+        run: |
+          IMAGE="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ needs.build_and_push.outputs.docker_tag }}"
+          kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary --ignore-not-found=true
+          kubectl -n "${{ env.NAMESPACE }}" set image \
+            -f k8s/canary/deployment-canary.yml \
+            ${{ env.DEPLOYMENT }}-canary="$IMAGE" \
+            --local -o yaml \
+          | kubectl -n "${{ env.NAMESPACE }}" apply -f -
+          kubectl -n "${{ env.NAMESPACE }}" apply  -f k8s/canary/service-canary.yml
+          kubectl -n "${{ env.NAMESPACE }}" apply  -f k8s/canary/ingress-canary.yaml
+          kubectl -n "${{ env.NAMESPACE }}" rollout status "deployment/${{ env.DEPLOYMENT }}-canary" --timeout=180s
+
+      - name: Notify Feishu - canary
+        uses: ./.github/actions/send-feishu
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD }}
+          status-emoji: "🟡"
+          title: "ACK: ${{ env.DEPLOYMENT }}-canary deployed"
+          details: "仓库: ${{ github.repository }}%0A分支: ${{ github.ref_name }}%0A提交: ${{ github.sha }}%0A镜像: ${{ needs.build_and_push.outputs.docker_tag }}%0A测试: header 中添加 X-Canary: grey"
+
+  manual_approval:
+    needs: [build_and_push, deploy_to_canary]
+    name: manual_approval
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Wait for Manual Approval
+        id: approve_full_release
+        uses: trstringer/manual-approval@v1
+        with:
+          issue-title: "🚦 灰度验证完成，是否全量发布？"
+          issue-body: |
+            灰度已完成，请选择是否全量发布新版本。
+            镜像: ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ needs.build_and_push.outputs.docker_tag }}
+            - Approve（同意）：全量发布（评论：approve or yes）
+            - Deny（拒绝）：自动回滚（评论：deny or no）
+          secret: ${{ github.TOKEN }}
+          minimum-approvals: 1
+          approvers: pengzuhao,yingyuankai,yuezh000
+          additional-approved-words: 'approve,yes'
+          additional-denied-words: 'deny,no'
+          fail-on-denial: false                           # 审批拒绝时继续执行
+          exclude-workflow-initiator-as-approver: false   # 发起人也可以审批
+          # timeout-minutes: 10
+
+      - name: Debug approval output
+        run: |
+          echo "approved value: '${{ steps.approve_full_release.outputs.approved }}'"
+          echo "approval-status: '${{ steps.approve_full_release.outputs.approval-status }}'"
+          echo "Type: ${{ steps.approve_full_release.outcome }}"
+    outputs:
+      approval_status: ${{ steps.approve_full_release.outputs.approval-status }}
+
+  release:
+    needs: [build_and_push, deploy_to_canary, manual_approval]
+    name: release_new
+    if: ${{ needs.manual_approval.outputs.approval_status == 'approved' }}
+    permissions:
+      contents: read
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: ./.github/actions/setup-kubectl-ack
+        with:
+          kubectl-version: ${{ env.KUBECTL_VERSION }}
+          kubeconfig-env: ${{ env.KUBECONFIG_PROD }}
+
+      - name: Update
+        run: |
+          kubectl -n "${{ env.NAMESPACE }}" set image deployment/${{ env.DEPLOYMENT }} ${{ env.DEPLOYMENT }}=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ needs.build_and_push.outputs.docker_tag }}
+          kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/canary/ingress-canary.yaml
+          kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/canary/service-canary.yml
+          kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary
+
+      - name: Notify Feishu - update
+        uses: ./.github/actions/send-feishu
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD }}
+          status-emoji: "🟢"
+          title: "ACK: ${{ env.DEPLOYMENT }} released"
+          details: "仓库: ${{ github.repository }}%0A分支: ${{ github.ref_name }}%0A提交: ${{ github.sha }}%0A镜像: ${{ needs.build_and_push.outputs.docker_tag }}"
+
+  rollback:
+    needs: [build_and_push, deploy_to_canary, manual_approval]
+    name: roll_back
+    if: ${{ needs.manual_approval.outputs.approval_status == 'denied' }}
+    permissions:
+      contents: read
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: ./.github/actions/setup-kubectl-ack
+        with:
+          kubectl-version: ${{ env.KUBECTL_VERSION }}
+          kubeconfig-env: ${{ env.KUBECONFIG_PROD }}
+
+      - name: Rollback
+        run: |
+          kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/canary/ingress-canary.yaml
+          kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/canary/service-canary.yml
+          kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary
+
+      - name: Notify Feishu - rollback
+        uses: ./.github/actions/send-feishu
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD }}
+          status-emoji: "🔴"
+          title: "ACK: ${{ env.DEPLOYMENT }} rollbacked"
+          details: "仓库: ${{ github.repository }}%0A分支: ${{ github.ref_name }}%0A提交: ${{ github.sha }}%0A镜像: ${{ needs.build_and_push.outputs.docker_tag }}"
+
+  notify_failed_job:
+    name: notify_failed_job
+    needs: [build_and_push, deploy_to_canary, manual_approval]
+    if: always() && (needs.build_and_push.result == 'failure' || needs.deploy_to_canary.result == 'failure' || needs.manual_approval.result == 'failure')
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Notify Feishu - failed
+        uses: ./.github/actions/send-feishu
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD }}
+          status-emoji: "🔴"
+          title: "ACK: ${{ env.DEPLOYMENT }} deployment failed"
+          details: "仓库: ${{ github.repository }}%0A分支: ${{ github.ref_name }}%0A提交: ${{ github.sha }}"

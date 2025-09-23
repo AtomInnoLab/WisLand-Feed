@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/backend-keepalive: 'true'
+    alb.ingress.kubernetes.io/connection-drain-enabled: 'true'
+    alb.ingress.kubernetes.io/cookie-timeout: '1800'
+    alb.ingress.kubernetes.io/healthcheck-code: 'http_2xx,http_3xx,http_4xx'
+    alb.ingress.kubernetes.io/healthcheck-enabled: 'true'
+    alb.ingress.kubernetes.io/healthcheck-httpversion: HTTP1.1
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '2'
+    alb.ingress.kubernetes.io/healthcheck-method: HEAD
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '3'
+    alb.ingress.kubernetes.io/sticky-session: 'true'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+  labels:
+    ingress-controller: alb
+  name: nginx-model-prod-ingress
+  namespace: prod-ns
+spec:
+  ingressClassName: alb
+  rules:
+    - host: prod-nginx-model.dev.atominnolab.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: nginx-model-prod-service
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - prod-nginx-model.dev.atominnolab.com
+      secretName: ssl-dev.atominnotab.com

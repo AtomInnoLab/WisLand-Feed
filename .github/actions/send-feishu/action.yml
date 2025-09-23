@@ -1,0 +1,39 @@
+name: Send Feishu Message
+description: Send a message to Feishu group
+inputs:
+  title:
+    required: true
+  details:
+    required: true
+  status-emoji:
+    default: "ℹ️"
+  webhook:
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send to Feishu
+      shell: bash
+      env:
+        WEBHOOK: ${{ inputs.webhook }}
+      run: |
+        details="${{ inputs.details }}"
+        details_formatted=$(echo "$details" | sed 's/%0A/\\n/g')
+        PAYLOAD=$(cat << EOF
+        {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "${{ inputs.title }} ${{ inputs.status-emoji }}",
+                "content": [
+                  [{ "tag": "text", "text": "$details_formatted" }]
+                ]
+              }
+            }
+          }
+        }
+        EOF
+        )
+        curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK"

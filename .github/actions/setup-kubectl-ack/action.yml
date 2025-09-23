@@ -1,0 +1,30 @@
+# .github/actions/setup-kubectl-ack/action.yml
+name: Setup kubectl for ACK
+description: Install kubectl and configure kubeconfig from secrets
+inputs:
+  kubectl-version:
+    description: 'Kubernetes version, e.g. v1.32.2'
+    required: true
+    default: 'v1.32.2'
+  kubeconfig-env:
+    description: 'dev or prod'
+    required: true
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
+      with:
+        version: ${{ inputs.kubectl-version }}
+
+    - name: Configure Kubeconfig
+      shell: bash
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ inputs.kubeconfig-env }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+        echo "✅ kubectl configured for namespace $NAMESPACE"
+      env:
+        NAMESPACE: ${{ env.NAMESPACE }}

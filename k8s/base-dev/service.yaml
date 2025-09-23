@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: dev-ns
+  name: wisland-feed-dev-service
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: tcp80
+      port: 80
+      protocol: TCP
+      targetPort: 3500
+    - name: tcp443
+      port: 443
+      protocol: TCP
+      targetPort: 3500
+  selector:
+    app: wisland-feed-dev
+    version: v1
+  sessionAffinity: None
+  type: ClusterIP

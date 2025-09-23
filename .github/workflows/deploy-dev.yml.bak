@@ -1,0 +1,118 @@
+name: deploy_ali_sae-dev
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [dev]
+  pull_request_target:
+    branches: [dev]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: "Log level"
+        required: true
+        default: "debug"
+
+jobs:
+  build_and_deploy:
+    # 仅在以下情况运行：
+    # 1. push 到 dev（github.event_name == 'push'）
+    # 2. PR 合并到 dev（github.event_name == 'pull_request_target' 且 merged == true）
+    # 3. 手动触发（github.event_name == 'workflow_dispatch'）
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
+    name: build_and_deploy
+    permissions:
+      contents: write
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get tag
+        shell: bash
+        run: |
+          datetime_now=$(echo $(date "+ %Y%m%d%H%M%S"))
+          echo "DOCKER_TAG=${datetime_now}" >> $GITHUB_ENV
+
+      - name: Log in to Aliyun ACR
+        run: |
+          docker login \
+            -u ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }} \
+            -p ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }} \
+            ${{ secrets.ALI_DOCKER_REGISTRY }}
+
+      - name: Build and push Docker image
+        shell: bash
+        run: |
+          docker build -t ${{ secrets.ALI_DOCKER_REGISTRY }}/mxrag-dev/nginx-model-dev:${{ env.DOCKER_TAG }} .
+          docker push ${{ secrets.ALI_DOCKER_REGISTRY }}/mxrag-dev/nginx-model-dev:${{ env.DOCKER_TAG }}
+
+      - name: Download saectl
+        shell: bash
+        run: |
+          wget https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250314/luedev/saectl-v0.1.5-linux-amd64.tar.gz
+          tar zxf saectl-v0.1.5-linux-amd64.tar.gz
+          sudo mv saectl /usr/bin/
+
+      - name: Restart sae singapore
+        shell: bash
+        env:
+          ALICLOUD_ACCESS_KEY: ${{ secrets.ALICLOUD_ACCESS_KEY_PH }}
+          ALICLOUD_SECRET_KEY: ${{ secrets.ALICLOUD_SECRET_KEY_PH }}
+          ALICLOUD_REGION: ${{ secrets.ALICLOUD_REGION_SAE }}
+        run: |
+          saectl set image deploy/nginx-model-dev main=${{ secrets.ALI_DOCKER_REGISTRY }}/mxrag-dev/nginx-model-dev:${{ env.DOCKER_TAG }}
+
+      - name: Notify Feishu
+        if: always()
+        shell: bash
+        run: |
+          set -x
+          unset http_proxy
+          unset https_proxy
+          cd ${{ github.workspace }}
+          BUILD_STATUS="${{ job.status }}"
+          # COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s"|awk 'NR==1{for (i=1; i<=NF; i++) printf "%s ", $i; print ""}')
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
+          COMMIT_SHA=$(git log -1 --pretty=format:"%h")
+
+          if [ "$BUILD_STATUS" = "success" ]; then
+            STATUS_TEXT=" Success"
+            DETAIL_TEXT="All deployment checks passed successfully"
+          else
+            STATUS_TEXT=" Failed"
+            DETAIL_TEXT="${{ env.ERROR_LOG }}"
+          fi
+          curl -H "Content-Type: application/json" -d "{
+            \"msg_type\": \"post\",
+            \"content\": {
+              \"post\": {
+                \"zh_cn\": {
+                  \"title\": \"nginx-model-dev - ${STATUS_TEXT}\",
+                  \"content\": [
+                    [{\"tag\": \"text\",\"text\": \"Branch: dev\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Commit Message: ${COMMIT_MSG}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Author: ${COMMIT_AUTHOR}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Commit SHA: ${COMMIT_SHA}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Build Status: ${STATUS_TEXT}\\n\"}],
+                    [{\"tag\": \"text\",\"text\": \"Docker Tag: ${{ env.DOCKER_TAG }}\\n\"}]
+                  ]
+                }
+              }
+            }
+          }" https://open.feishu.cn/open-apis/bot/v2/hook/27347fca-da5c-4a26-9e8d-afca409f96c7
+
+          set +x
+
+      - name: Clean workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf ${{ github.workspace }}/*

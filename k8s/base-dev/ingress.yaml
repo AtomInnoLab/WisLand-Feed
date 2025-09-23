@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: dev-ns
+  name: wisland-feed-dev-ingress
+  labels:
+    ingress-controller: alb
+  annotations:
+    # 健康检查
+    alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+    alb.ingress.kubernetes.io/healthcheck-path: "/"
+    alb.ingress.kubernetes.io/healthcheck-protocol: "HTTP"
+    alb.ingress.kubernetes.io/healthcheck-httpversion: "HTTP1.1"
+    alb.ingress.kubernetes.io/healthcheck-method: "HEAD"
+    alb.ingress.kubernetes.io/healthcheck-code: "http_2xx,http_3xx,http_4xx"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "2"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # 会话保持
+    alb.ingress.kubernetes.io/sticky-session: "true"
+    # cookie超时
+    alb.ingress.kubernetes.io/cookie-timeout: "1800"
+    # 后端长连接
+    alb.ingress.kubernetes.io/backend-keepalive: "true"
+    # 开启“连接优雅中断”
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+
+spec:
+  ingressClassName: alb
+  rules:
+    - host: wisland-feed-dev.wispaper.inner
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wisland-feed-dev-service
+                port:
+                  number: 80

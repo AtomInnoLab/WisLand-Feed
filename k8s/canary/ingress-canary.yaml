@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/canary: 'true'
+    alb.ingress.kubernetes.io/canary-by-header: X-Canary
+    alb.ingress.kubernetes.io/canary-by-header-value: grey
+    alb.ingress.kubernetes.io/order: '1'
+  labels:
+    ingress-controller: alb
+  name: nginx-model-prod-ingress-canary
+  namespace: prod-ns
+spec:
+  ingressClassName: alb
+  rules:
+    - host: prod-nginx-model.dev.atominnolab.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: nginx-model-prod-service-canary
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - prod-nginx-model.dev.atominnolab.com
+      secretName: tls-dev.atominnolab.com
