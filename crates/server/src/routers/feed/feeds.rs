@@ -158,7 +158,7 @@ pub async fn verify(
         ("channel" = String, Path, description = "频道"),
     ),
     responses(
-        (status = 200, body = bool),
+        (status = 200, body = JobDetail),
     ),
     tag = FEED_TAG,
 )]
@@ -166,7 +166,7 @@ pub async fn verify_detail(
     Query(payload): Query<FeedRequest>,
     State(state): State<AppState>,
     User(user): User,
-) -> Result<ApiResponse<JobDetail>, ApiError> {
+) -> Result<ApiResponse<Option<JobDetail>>, ApiError> {
     tracing::info!("verify papers status");
     let job = VerifyJob::new(
         state.redis.pool,
