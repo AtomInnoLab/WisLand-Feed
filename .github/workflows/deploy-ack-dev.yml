@@ -47,6 +47,12 @@ jobs:
         with:
           toolchain: 1.88.0
           override: true
+      
+      - name: Set proxy
+        run: |
+          rm -rf ~/.gitconfig || true
+          git config --global url."https://${{ secrets.GH_ACCESS_TOKEN }}@github.com".insteadOf ssh://git@github.com
+          git config --global credential.helper store
 
       - name: Building
         shell: bash
