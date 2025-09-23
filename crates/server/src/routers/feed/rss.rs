@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use common::{error::api_error::*, prelude::ApiCode};
 use seaorm_db::{
-    entities::web::feed::rss_sources,
+    entities::feed::rss_sources,
     query::feed::rss_sources::{RssSourceData, RssSourcesQuery},
 };
 use serde::Deserialize;

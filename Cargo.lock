@@ -805,6 +805,8 @@ name = "common"
 version = "0.0.1"
 dependencies = [
  "axum 0.8.4",
+ "bb8",
+ "bb8-redis",
  "reqwest",
  "sea-orm",
  "serde_json",
@@ -1261,7 +1263,6 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 name = "feed"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "apalis",
  "apalis-cron",
  "apalis-redis",
@@ -1270,6 +1271,7 @@ dependencies = [
  "bb8",
  "bb8-redis",
  "chrono",
+ "common",
  "conf",
  "futures",
  "oss",
@@ -1282,6 +1284,7 @@ dependencies = [
  "search",
  "serde",
  "serde_json",
+ "snafu",
  "tokio",
  "tokio-util",
  "tower 0.5.2",
@@ -2446,38 +2449,6 @@ name = "murmur3"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9252111cf132ba0929b6f8e030cac2a24b507f3a4d6db6fb2896f27b354c714b"
-
-[[package]]
-name = "mxagent"
-version = "0.1.0"
-dependencies = [
- "async-openai",
- "async-stream",
- "async-trait",
- "cfg-if",
- "chunk-splitter",
- "conf",
- "futures",
- "indexmap 2.10.0",
- "itertools",
- "md5",
- "model-hub",
- "protocol",
- "regex",
- "reqwest",
- "seaorm-db",
- "search",
- "serde",
- "serde_json",
- "serde_json5",
- "thiserror 2.0.12",
- "tokio",
- "tokio-util",
- "tracing",
- "typed-builder",
- "utils",
- "uuid",
-]
 
 [[package]]
 name = "native-tls"
@@ -4297,7 +4268,6 @@ dependencies = [
  "http",
  "http-body-util",
  "itertools",
- "mxagent",
  "protocol",
  "redis",
  "sea-orm",

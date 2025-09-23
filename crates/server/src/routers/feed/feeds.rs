@@ -3,14 +3,14 @@ use crate::model::page::{Page, Pagination};
 use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state::AppState};
 use axum::Json;
 use axum::extract::{Query, State};
+use chrono::{DateTime, FixedOffset};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
-use seaorm_db::entities::web::feed::user_paper_verifications;
-use seaorm_db::entities::web::sea_orm_active_enums::VerificationMatch;
+use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
 use seaorm_db::query::feed::user_paper_verifications::{
-    MarkReadParams, UserPaperVerificationsQuery,
+    ListVerifiedParams, MarkReadParams, UserPaperVerificationsQuery, VerifiedPaperItem,
 };
 use seaorm_db::query::feed::utils::{
     UserUnverifiedPapers, count_user_unread_papers, get_user_unverified_papers_count_info,
@@ -18,6 +18,12 @@ use seaorm_db::query::feed::utils::{
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use utoipa::ToSchema;
+
+#[derive(Debug, Deserialize, ToSchema, Clone, Copy)]
+pub struct TimeRangeParam {
+    pub start: Option<DateTime<FixedOffset>>,
+    pub end: Option<DateTime<FixedOffset>>,
+}
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct FeedRequest {
@@ -35,12 +41,14 @@ pub struct AllVerifiedPapersRequest {
     pub pagination: Page,
     pub channel: Option<String>,
     pub matches: Option<Vec<VerificationMatch>>,
+    pub user_interest_ids: Option<Vec<i64>>,
+    pub time_range: Option<TimeRangeParam>,
 }
 
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
 pub struct AllVerifiedPapersResponse {
     pub pagination: Pagination,
-    pub papers: Vec<user_paper_verifications::Model>,
+    pub papers: Vec<VerifiedPaperItem>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -178,7 +186,7 @@ pub async fn verify_detail(
 }
 
 #[utoipa::path(
-    get,
+    post,
     path = "/all-verified-papers",
     request_body = AllVerifiedPapersRequest,
     responses(
@@ -189,17 +197,21 @@ pub async fn verify_detail(
 pub async fn all_verified_papers(
     State(state): State<AppState>,
     User(user): User,
-    Query(payload): Query<AllVerifiedPapersRequest>,
+    Json(payload): Json<AllVerifiedPapersRequest>,
 ) -> Result<ApiResponse<AllVerifiedPapersResponse>, ApiError> {
     tracing::info!("list all verified papers");
 
     let verified_papers = UserPaperVerificationsQuery::list_verified_by_user(
         &state.conn,
         user.id,
-        payload.channel,
-        payload.matches,
-        payload.pagination.offset(),
-        payload.pagination.page_size(),
+        ListVerifiedParams {
+            channel: payload.channel.clone(),
+            matches: payload.matches.clone(),
+            user_interest_ids: payload.user_interest_ids.clone(),
+            time_range: payload.time_range.map(|tr| (tr.start, tr.end)),
+            offset: payload.pagination.offset(),
+            limit: payload.pagination.page_size(),
+        },
     )
     .await
     .context(DbErrSnafu {

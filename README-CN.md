@@ -118,4 +118,17 @@ cargo run -p migration
 
 
 ## 环境变量
+APP_OSS.ACCESS_KEY_ID="阿里云oss access key id"
+APP_OSS.ACCESS_KEY_SECRET="阿里云oss access key secret"
+APP_OSS.BUCKET="阿里云oss bucket name" # eg.yyzjupload-dev
+APP_OSS.ENDPOINT="oss-cn-shanghai.aliyuncs.com"
+APP_OSS.PREFIX="阿里云oss bucket 中的前缀名称" # eg. wisland-feed
 
+APP_RSS.WORKERS.PULL_SOURCES.CRON="* 1 * * * *"
+APP_RSS.WORKERS.UPDATE_USER_INTEREST_METADATA.CONCURRENCY=1
+
+
+APP_RSS.WORKERS.PARSE_RSS_XML.CRON="* 1 * * * *"
+
+APP_DATABASE.URL="数据库连接"
+APP_FEED_REDIS.URL="redis连接"

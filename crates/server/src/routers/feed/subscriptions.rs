@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use common::{error::api_error::*, prelude::ApiCode};
 use seaorm_db::{
-    entities::web::feed::rss_subscriptions, query::feed::rss_subscriptions::RssSubscriptionsQuery,
+    entities::feed::rss_subscriptions, query::feed::rss_subscriptions::RssSubscriptionsQuery,
 };
 use serde::Deserialize;
 use snafu::ResultExt;
@@ -61,11 +61,14 @@ pub async fn batch_subscriptions(
     User(user): User,
     Json(payload): Json<SubscriptionsCreateRequest>,
 ) -> Result<ApiResponse<Vec<i64>>, ApiError> {
-    tracing::info!(
-        user_id = user.id,
-        count = payload.source_ids.len(),
-        "create subscriptions"
-    );
+    let count = payload.source_ids.len();
+    tracing::info!(user_id = user.id, count, "create subscriptions request");
+    if count == 0 {
+        tracing::info!(
+            user_id = user.id,
+            "empty source_ids: clear all subscriptions"
+        );
+    }
 
     let ids = RssSubscriptionsQuery::replace_many(&state.conn, user.id, payload.source_ids)
         .await
@@ -74,6 +77,11 @@ pub async fn batch_subscriptions(
             code: ApiCode::COMMON_DATABASE_ERROR,
         })?;
 
+    tracing::info!(
+        user_id = user.id,
+        returned = ids.len(),
+        "create subscriptions done"
+    );
     Ok(ApiResponse::data(ids))
 }
 

@@ -5,11 +5,6 @@ edition = "2024"
 
 
 [dependencies]
-# feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "feed", default-features = false, features = [
-#     "web",
-# ] }
-# conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", features = ["agent_redis"] }
-
 tracing = { workspace = true }
 
 tokio = { workspace = true }
@@ -19,12 +14,20 @@ futures = { workspace = true }
 dotenvy = { workspace = true }
 
 
-conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", default-features = false, features = [
+conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", default-features = false, features = [
+    "feed",
     "agent_redis",
 ] }
-feed = { path = "../../../WisAgent/crates/feed", version = "*", package = "feed", default-features = false, features = [
-    "web",
+feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", package = "feed", default-features = false, features = [
+    "feed",
 ] }
+
+
+# conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", default-features = false, features = [
+#     "feed",
+#     "agent_redis",
+# ] }
+# feed = { path = "../../../WisAgent/crates/feed", version = "*", package = "feed", default-features = false, features = ["redis"]}
 
 
 [dev-dependencies]
@@ -46,29 +49,27 @@ rss = "2.0"
 uuid = { workspace = true }
 anyhow = "1"
 
-# seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "seaorm-db", default-features = false, features = [
-#     "web",
-# ] }
-# search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "search", default-features = false, features = [
-#     "web",
-# ] }
-# protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "protocol", default-features = false, features = [
-#     "web",
-#     "redis"
-# ] }
-# oss = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "oss" }
-
-
-
-
-seaorm-db = { path = "../../../WisAgent/crates/seaorm-db", version = "*", package = "seaorm-db", default-features = false, features = [
-    "web",
+seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "seaorm-db", default-features = false, features = [
+    "feed",
 ] }
-search = { path = "../../../WisAgent/crates/search", version = "*", package = "search", default-features = false, features = [
-    "web",
+search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "search", default-features = false, features = [
+    "feed",
 ] }
-protocol = { path = "../../../WisAgent/crates/protocol", version = "*", package = "protocol", default-features = false, features = [
-    "web",
+protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "protocol", default-features = false, features = [
+    "feed",
     "redis",
 ] }
-oss = { path = "../../../WisAgent/crates/oss", version = "*", package = "oss", default-features = false }
+oss = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "oss", default-features = false }
+
+
+# seaorm-db = { path = "../../../WisAgent/crates/seaorm-db", version = "*", package = "seaorm-db", default-features = false, features = [
+#     "feed",
+# ] }
+# search = { path = "../../../WisAgent/crates/search", version = "*", package = "search", default-features = false, features = [
+#     "feed",
+# ] }
+# protocol = { path = "../../../WisAgent/crates/protocol", version = "*", package = "protocol", default-features = false, features = [
+#     "feed",
+#     "redis",
+# ] }
+# oss = { path = "../../../WisAgent/crates/oss", version = "*", package = "oss", default-features = false}
