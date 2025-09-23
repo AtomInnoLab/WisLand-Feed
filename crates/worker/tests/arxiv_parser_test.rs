@@ -27,15 +27,16 @@ async fn test_arxiv_parser_minimal_rss_ok() -> Result<(), Box<dyn std::error::Er
     init_test_tracing();
 
     let url = "arxiv/10264175983241631030.xml";
+    let app_config = app_config();
 
-    let oss_config = app_config().oss.clone();
+    let oss_config = app_config.oss.clone();
     info!(?oss_config, "downloading RSS from OSS");
     let oss_client = OssClient::new(&oss_config)?;
 
     let xml_buf = oss_client.download(url).await?;
     let mut reader = std::io::Cursor::new(xml_buf.to_vec());
     let parser = ArxivParser {};
-    let result = parser.parse(1, 1, "arxiv".to_string(), &mut reader);
+    let result = parser.parse(1, 1, "arxiv".to_string(), &app_config.rss, &mut reader);
     assert!(
         result.is_ok(),
         "ArxivParser should parse minimal RSS successfully"
@@ -54,9 +55,11 @@ async fn test_arxiv_parser_minimal_rss_ok() -> Result<(), Box<dyn std::error::Er
 async fn test_arxiv_parser_invalid_input_err() -> Result<(), Box<dyn std::error::Error>> {
     init_test_tracing();
 
+    let app_config = app_config();
+
     let mut cursor = Cursor::new(b"not xml".as_slice());
     let parser = ArxivParser {};
-    let result = parser.parse(1, 1, "arxiv".to_string(), &mut cursor);
+    let result = parser.parse(1, 1, "arxiv".to_string(), &app_config.rss, &mut cursor);
     assert!(result.is_err(), "ArxivParser should error on invalid input");
     Ok(())
 }

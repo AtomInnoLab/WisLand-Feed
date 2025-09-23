@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(target: "feed", redis_prefix = %cfg.rss.redis_prefix, "Starting feed workers");
 
     // 初始化并启动 workers（Monitor 注册在 init 内部完成）
-    manager::lib::init().await?;
+    manager::entry::init().await?;
     info!(target: "feed", "Workers started and running");
     // 阻塞运行：Apalis Monitor 内部托管，当前进程保持存活
     // 如果需要显式阻塞，可在此添加一个 pending future

@@ -4,7 +4,7 @@ use apalis::prelude::Storage;
 use apalis_redis::RedisStorage;
 use conf::config::app_config;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
-use seaorm_db::{connection::get_db, entities::web::feed::rss_job_logs};
+use seaorm_db::{connection::get_db, entities::feed::rss_job_logs};
 use tracing::{debug, error, info, instrument};
 use tracing_subscriber::EnvFilter;
 
