@@ -51,7 +51,7 @@ redis_key_default_expire=600
 temp_download_path="/temp"
 
 [rss.feed_redis]
-url = "redis://127.0.0.1:16379/0"
+url = ""
 pool_size = 16
 
 # Named workers mapping for easier .env override by name
