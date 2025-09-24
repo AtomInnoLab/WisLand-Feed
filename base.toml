@@ -44,7 +44,6 @@ prefix = "prefix"
 [rss]
 max_prompt_number = 10
 max_rss_paper = 1000
-redis_prefix = "wisland-feed"
 only_log_failed_jobs = true
 arxiv_header_image = "https://info.arxiv.org/brand/images/brand-logo-primary.jpg"
 temp_download_path = "/temp"
@@ -53,6 +52,7 @@ temp_download_path = "/temp"
 url = ""
 pool_size = 16
 redis_key_default_expire = 600
+redis_prefix = "wisland-feed"
 
 # Named workers mapping for easier .env override by name
 [rss.workers.verify_papers]

@@ -25,8 +25,8 @@ impl AppState {
         AppState {
             conn: get_db().await.clone(),
             redis: RedisService {
-                pool: connect_redis(&config.agent_redis).await,
-                apalis_conn: apalis_redis::connect(config.agent_redis.url.as_str())
+                pool: connect_redis(&config.rss.feed_redis).await,
+                apalis_conn: apalis_redis::connect(config.rss.feed_redis.url.as_str())
                     .await
                     .expect("Could not connect redis"),
             },
@@ -59,7 +59,7 @@ pub async fn graceful_shutdown(_state: AppState) {
 }
 
 pub async fn connect_redis(
-    config: &conf::config::AgentRedisConfig,
+    config: &conf::config::FeedRedisConfig,
 ) -> bb8::Pool<bb8_redis::RedisConnectionManager> {
     let manager =
         bb8_redis::RedisConnectionManager::new(config.url.clone()).expect("Invalid Redis URL");
