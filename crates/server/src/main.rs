@@ -1,11 +1,13 @@
 use axum::BoxError;
 use conf::config::app_config;
+use dotenvy::dotenv;
 use server::{app::build_app, state::app_state::graceful_shutdown};
 use std::net::{IpAddr, SocketAddr};
 use tracing::*;
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
+    dotenv().ok();
     let config = app_config();
 
     let (router, state) = build_app().await?;

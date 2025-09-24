@@ -2,6 +2,7 @@ use axum::{Router, middleware};
 use common::error::api_error::*;
 use conf::config::app_config;
 use tower_http::catch_panic::CatchPanicLayer;
+use tracing::info;
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_scalar::{Scalar, Servable};
@@ -27,6 +28,8 @@ struct ApiDoc;
 pub async fn build_app() -> Result<(Router, AppState), ApiError> {
     // get app config
     let config = app_config();
+
+    info!("config: {:?}", config);
     // build app state
     let state = AppState::new().await;
 
