@@ -46,9 +46,12 @@ max_prompt_number=10
 max_rss_paper=1000
 redis_prefix="wisland-feed"
 only_log_failed_jobs=true
+arxiv_header_image="https://info.arxiv.org/brand/images/brand-logo-primary.jpg"
+redis_key_default_expire=600
+temp_download_path="/temp"
 
 [rss.feed_redis]
-url = "redis://127.0.0.1:16379/0"
+url = ""
 pool_size = 16
 
 # Named workers mapping for easier .env override by name
