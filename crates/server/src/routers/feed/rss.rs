@@ -18,7 +18,7 @@ use super::FEED_TAG;
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(untagged)]
 pub enum RssNode {
-    Leaf(rss_sources::Model),
+    Leaf(Box<rss_sources::Model>),
     Branch(Box<RssTree>),
 }
 
@@ -31,6 +31,7 @@ pub struct RssTree {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RssTreeVec {
     pub name: String,
+    #[schema(no_recursion)]
     pub children: Vec<RssTreeVec>,
     pub data: Option<rss_sources::Model>,
 }
@@ -49,7 +50,7 @@ pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTree {
                 // 最后一个层级，直接插入 Leaf
                 current_tree
                     .children
-                    .insert(level.to_string(), RssNode::Leaf(rss_source));
+                    .insert(level.to_string(), RssNode::Leaf(Box::new(rss_source)));
                 break;
             } else {
                 // 中间层级，创建 Branch
@@ -79,7 +80,7 @@ pub fn convert_hashmap_to_vec(tree: RssTree) -> RssTreeVec {
         let child_tree = match node {
             RssNode::Leaf(data) => RssTreeVec {
                 name: key,
-                data: Some(data.clone()),
+                data: Some((*data).clone()),
                 children: vec![],
             },
             RssNode::Branch(branch_tree) => {
@@ -105,7 +106,7 @@ pub fn convert_hashmap_to_vec(tree: RssTree) -> RssTreeVec {
     get,
     path = "/rss",
     responses(
-        (status = 200, body = rss_sources::Model),
+        (status = 200, body = RssTreeVec),
     ),
     tag = FEED_TAG,
 )]
