@@ -68,7 +68,9 @@ async fn test_update_source_data_smoke() -> anyhow::Result<()> {
                 guid: paper.guid,
                 title: paper.title,
                 abstract_: paper.abstract_,
-                authors: paper.authors,
+                authors: paper
+                    .authors
+                    .map(|authors| authors.split(",").map(|s| s.trim().to_string()).collect()),
                 publication_date: paper.publication_date,
                 url: paper.url,
                 doi: paper.doi,
@@ -197,7 +199,9 @@ async fn test_update_source_data_with_invalid_url() -> Result<(), Box<dyn std::e
                 guid: paper.guid,
                 title: paper.title,
                 abstract_: paper.abstract_,
-                authors: paper.authors,
+                authors: paper
+                    .authors
+                    .map(|authors| authors.split(",").map(|s| s.trim().to_string()).collect()),
                 publication_date: paper.publication_date,
                 url: paper.url,
                 doi: paper.doi,
@@ -321,7 +325,12 @@ async fn test_update_source_data_with_empty_data() -> Result<(), Box<dyn std::er
                 guid: paper.guid,
                 title: paper.title,
                 abstract_: paper.abstract_,
-                authors: paper.authors,
+                authors: paper.authors.map(|authors| {
+                    authors
+                        .split(",")
+                        .map(|s| s.trim().to_string())
+                        .collect::<Vec<String>>()
+                }),
                 publication_date: paper.publication_date,
                 url: paper.url,
                 doi: paper.doi,
