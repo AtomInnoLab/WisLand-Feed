@@ -17,7 +17,7 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "2"
     alb.ingress.kubernetes.io/healthy-threshold-count: "3"
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
-
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},{"HTTPS": 443}]'
     # 会话保持
     alb.ingress.kubernetes.io/sticky-session: "true"
     # cookie超时

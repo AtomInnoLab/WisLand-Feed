@@ -6,6 +6,7 @@ metadata:
     alb.ingress.kubernetes.io/canary-by-header: X-Canary
     alb.ingress.kubernetes.io/canary-by-header-value: grey
     alb.ingress.kubernetes.io/order: '1'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},{"HTTPS": 443}]'
   labels:
     ingress-controller: alb
   name: nginx-model-prod-ingress-canary

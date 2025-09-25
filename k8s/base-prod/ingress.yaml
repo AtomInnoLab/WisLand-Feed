@@ -16,6 +16,7 @@ metadata:
     alb.ingress.kubernetes.io/healthy-threshold-count: '3'
     alb.ingress.kubernetes.io/sticky-session: 'true'
     alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},{"HTTPS": 443}]'
   labels:
     ingress-controller: alb
   name: nginx-model-prod-ingress
