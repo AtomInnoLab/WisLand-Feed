@@ -8,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     // 加载配置并输出关键启动信息
     let cfg = app_config();
-    info!(target: "feed", redis_prefix = %cfg.rss.redis_prefix, "Starting feed workers");
+    info!(target: "feed", redis_prefix = %cfg.rss.feed_redis.redis_prefix, "Starting feed workers");
 
     // 初始化并启动 workers（Monitor 注册在 init 内部完成）
     manager::entry::init().await?;

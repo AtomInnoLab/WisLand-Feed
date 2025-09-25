@@ -3,7 +3,7 @@ use crate::model::page::{Page, Pagination};
 use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state::AppState};
 use axum::Json;
 use axum::extract::{Query, State};
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Local, TimeZone};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
@@ -43,6 +43,7 @@ pub struct AllVerifiedPapersRequest {
     pub matches: Option<Vec<VerificationMatch>>,
     pub user_interest_ids: Option<Vec<i64>>,
     pub time_range: Option<TimeRangeParam>,
+    pub ignore_time_range: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
@@ -170,9 +171,10 @@ pub async fn verify_detail(
     tracing::info!("verify papers status");
     let job = VerifyJob::new(
         state.redis.pool,
-        state.config.rss.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
         user.id,
         payload.channel.as_deref(),
+        state.config.rss.feed_redis.redis_key_default_expire,
     );
     let detail = job
         .get_job_detail()
@@ -201,6 +203,19 @@ pub async fn all_verified_papers(
 ) -> Result<ApiResponse<AllVerifiedPapersResponse>, ApiError> {
     tracing::info!("list all verified papers");
 
+    // 处理时间范围，如果开始时间没有指定，则设置为今天的零点
+    let time_range = payload.time_range.map(|tr| {
+        let start = tr.start.unwrap_or_else(|| {
+            // 获取今天的零点（本地时间转换为固定偏移时间）
+            let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
+            Local
+                .from_local_datetime(&today_start)
+                .unwrap()
+                .fixed_offset()
+        });
+        (Some(start), tr.end)
+    });
+
     let verified_papers = UserPaperVerificationsQuery::list_verified_by_user(
         &state.conn,
         user.id,
@@ -208,9 +223,10 @@ pub async fn all_verified_papers(
             channel: payload.channel.clone(),
             matches: payload.matches.clone(),
             user_interest_ids: payload.user_interest_ids.clone(),
-            time_range: payload.time_range.map(|tr| (tr.start, tr.end)),
+            time_range,
             offset: payload.pagination.offset(),
             limit: payload.pagination.page_size(),
+            ignore_time_range: payload.ignore_time_range,
         },
     )
     .await

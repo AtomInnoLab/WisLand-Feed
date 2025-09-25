@@ -44,7 +44,6 @@ prefix = "prefix"
 [rss]
 max_prompt_number = 10
 max_rss_paper = 1000
-redis_prefix = "wisland-feed"
 only_log_failed_jobs = true
 arxiv_header_image = "https://info.arxiv.org/brand/images/brand-logo-primary.jpg"
 temp_download_path = "/temp"
