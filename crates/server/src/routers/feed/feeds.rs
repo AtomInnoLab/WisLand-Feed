@@ -15,8 +15,16 @@ use seaorm_db::query::feed::user_paper_verifications::{
 use seaorm_db::query::feed::utils::{
     UserUnverifiedPapers, count_user_unread_papers, get_user_unverified_papers_count_info,
 };
+use seaorm_db::{
+    entities::feed::rss_sources,
+    query::feed::{
+        rss_sources::RssSourcesQuery, rss_subscriptions::RssSubscriptionsQuery,
+        user_interests::UserInterestsQuery,
+    },
+};
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 #[derive(Debug, Deserialize, ToSchema, Clone, Copy)]
@@ -50,6 +58,8 @@ pub struct AllVerifiedPapersRequest {
 pub struct AllVerifiedPapersResponse {
     pub pagination: Pagination,
     pub papers: Vec<VerifiedPaperItem>,
+    pub interest_map: HashMap<i64, String>,
+    pub source_map: HashMap<i32, rss_sources::Model>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -235,6 +245,41 @@ pub async fn all_verified_papers(
         code: ApiCode::COMMON_DATABASE_ERROR,
     })?;
 
+    // 查询用户兴趣与订阅源
+    let interest_items = UserInterestsQuery::list_by_user_id(&state.conn, user.id)
+        .await
+        .context(DbErrSnafu {
+            stage: "list-user-interests",
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        })?;
+    let interest_map: HashMap<i64, String> = interest_items
+        .into_iter()
+        .map(|m| (m.id, m.interest))
+        .collect();
+
+    let subscriptions = RssSubscriptionsQuery::list_by_user_id(&state.conn, user.id, None)
+        .await
+        .context(DbErrSnafu {
+            stage: "get-rss-subscriptions",
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        })?;
+    let mut source_ids: Vec<i32> = subscriptions.into_iter().map(|s| s.source_id).collect();
+    source_ids.sort_unstable();
+    source_ids.dedup();
+
+    let sources: Vec<rss_sources::Model> = if source_ids.is_empty() {
+        Vec::new()
+    } else {
+        RssSourcesQuery::get_by_ids(&state.conn, source_ids)
+            .await
+            .context(DbErrSnafu {
+                stage: "get-rss-sources",
+                code: ApiCode::COMMON_DATABASE_ERROR,
+            })?
+    };
+    let source_map: HashMap<i32, rss_sources::Model> =
+        sources.into_iter().map(|m| (m.id, m)).collect();
+
     Ok(ApiResponse::data(AllVerifiedPapersResponse {
         pagination: Pagination {
             page: payload.pagination.page(),
@@ -243,6 +288,8 @@ pub async fn all_verified_papers(
             total_pages: verified_papers.total / payload.pagination.page_size() as u64,
         },
         papers: verified_papers.items,
+        interest_map,
+        source_map,
     }))
 }
 

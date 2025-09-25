@@ -1,0 +1,9 @@
+services:
+  wisland-feed-dev:
+    build: .
+    ports:
+      - 3500:3500
+    volumes:
+      - .:/app
+      - ../WisAgent:/WisAgent
+    command: sleep infinity

@@ -8,6 +8,8 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+use dotenvy::dotenv;
+
 #[tokio::test]
 async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt()
@@ -17,6 +19,7 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
         .with_writer(std::io::stderr)
         .compact()
         .try_init();
+    dotenv().ok();
 
     info!("starting test_run_verify_with_input_smoke");
     // prepare db connection (ensure DB init)

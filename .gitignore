@@ -6,3 +6,4 @@
 
 base.local.toml
 .env
+data/
