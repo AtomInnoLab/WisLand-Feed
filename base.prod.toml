@@ -2,8 +2,8 @@ name = "wisland-feed-prod"
 log = "debug,sqlx=off,h2=off,sea_orm=off,hyper_util=off"
 
 [database]
-url = "postgresql://postgres:lckL0SRWsehuBHm11iRPF607LHtQKDEm@pgm-t4ndb5eg05j79m02.pgsql.singapore.rds.aliyuncs.com:5432/wisland_feed?sslmode=disable"
+url = "database url"
 
 [agent_redis]
-url = "redis://:qqtGrRntjDpMjcf5+88PgQ@r-t4n1mhl69h4x1f8td8.redis.singapore.rds.aliyuncs.com:6379/1"
+url = "redis url"
 pool_size = 16

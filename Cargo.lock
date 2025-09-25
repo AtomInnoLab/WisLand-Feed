@@ -729,7 +729,7 @@ dependencies = [
  "conf",
  "encoding_rs",
  "html5ever",
- "itertools",
+ "itertools 0.14.0",
  "markup5ever",
  "markup5ever_rcdom",
  "md5",
@@ -2149,6 +2149,15 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -2913,7 +2922,7 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "image",
- "itertools",
+ "itertools 0.12.1",
  "js-sys",
  "libloading",
  "log",
@@ -3264,7 +3273,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -3537,7 +3546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2964d0cf57a3e7a06e8183d14a8b527195c706b7983549cd5462d5aa3747438f"
 dependencies = [
  "either",
- "itertools",
+ "itertools 0.14.0",
  "rayon",
 ]
 
@@ -4182,7 +4191,7 @@ dependencies = [
  "common",
  "conf",
  "derive_builder",
- "itertools",
+ "itertools 0.14.0",
  "migration",
  "regex",
  "sea-orm",
@@ -4208,7 +4217,7 @@ dependencies = [
  "conf",
  "derive_builder",
  "futures",
- "itertools",
+ "itertools 0.14.0",
  "model-hub",
  "ndarray",
  "once_cell",
@@ -4376,7 +4385,7 @@ dependencies = [
  "futures",
  "http",
  "http-body-util",
- "itertools",
+ "itertools 0.14.0",
  "protocol",
  "redis",
  "sea-orm",
@@ -5103,7 +5112,7 @@ dependencies = [
  "esaxx-rs",
  "getrandom 0.3.3",
  "indicatif",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "macro_rules_attribute",
  "monostate",
