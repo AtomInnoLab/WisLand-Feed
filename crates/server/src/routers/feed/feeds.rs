@@ -52,6 +52,7 @@ pub struct AllVerifiedPapersRequest {
     pub user_interest_ids: Option<Vec<i64>>,
     pub time_range: Option<TimeRangeParam>,
     pub ignore_time_range: Option<bool>,
+    pub keyword: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
@@ -237,6 +238,7 @@ pub async fn all_verified_papers(
             offset: payload.pagination.offset(),
             limit: payload.pagination.page_size(),
             ignore_time_range: payload.ignore_time_range,
+            keyword: payload.keyword.clone(),
         },
     )
     .await
