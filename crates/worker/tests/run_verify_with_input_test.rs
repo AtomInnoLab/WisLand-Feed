@@ -67,6 +67,7 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
         .uuid(Uuid::new_v4())
         .venue(Some("Nowhere 2025".to_string()))
         .pdf_url(Some("https://example.com/paper.pdf".to_string()))
+        .cites(None)
         .build();
     info!(title = %paper.title, authors = %paper.authors.join(", "), venue = ?paper.venue, url = ?paper.url, "constructed paper input");
 
