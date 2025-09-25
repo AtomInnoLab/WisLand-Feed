@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::{Path, State};
 use common::{error::api_error::*, prelude::ApiCode};
@@ -5,7 +7,7 @@ use seaorm_db::{
     entities::feed::rss_sources,
     query::feed::rss_sources::{RssSourceData, RssSourcesQuery},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use utoipa::ToSchema;
 
@@ -13,18 +15,105 @@ use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state:
 
 use super::FEED_TAG;
 
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum RssNode {
+    Leaf(Box<rss_sources::Model>),
+    Branch(Box<RssTree>),
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RssTree {
+    pub name: String,
+    pub children: HashMap<String, RssNode>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RssTreeVec {
+    pub name: String,
+    #[schema(no_recursion)]
+    pub children: Vec<RssTreeVec>,
+    pub data: Option<rss_sources::Model>,
+}
+
+pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTree {
+    let mut tree = RssTree {
+        name: "root".to_string(),
+        children: HashMap::new(),
+    };
+    for rss_source in rss_sources {
+        let mut levels = vec![rss_source.channel.clone()];
+        levels.extend(rss_source.name.split('|').map(|s| s.to_string()));
+        let mut current_tree = &mut tree;
+        for (i, level) in levels.iter().enumerate() {
+            if i == levels.len() - 1 {
+                // 最后一个层级，直接插入 Leaf
+                current_tree
+                    .children
+                    .insert(level.to_string(), RssNode::Leaf(Box::new(rss_source)));
+                break;
+            } else {
+                // 中间层级，创建 Branch
+                if !current_tree.children.contains_key(level) {
+                    current_tree.children.insert(
+                        level.to_string(),
+                        RssNode::Branch(Box::new(RssTree {
+                            name: level.to_string(),
+                            children: HashMap::new(),
+                        })),
+                    );
+                }
+                current_tree = match current_tree.children.get_mut(level).unwrap() {
+                    RssNode::Branch(branch) => branch.as_mut(),
+                    RssNode::Leaf(_) => unreachable!(),
+                };
+            }
+        }
+    }
+    tree
+}
+
+pub fn convert_hashmap_to_vec(tree: RssTree) -> RssTreeVec {
+    let mut children_vec = Vec::new();
+
+    for (key, node) in tree.children {
+        let child_tree = match node {
+            RssNode::Leaf(data) => RssTreeVec {
+                name: key,
+                data: Some((*data).clone()),
+                children: vec![],
+            },
+            RssNode::Branch(branch_tree) => {
+                let converted_tree = convert_hashmap_to_vec(*branch_tree);
+                RssTreeVec {
+                    name: key,
+                    children: converted_tree.children,
+                    data: None,
+                }
+            }
+        };
+        children_vec.push(child_tree);
+    }
+
+    RssTreeVec {
+        name: tree.name,
+        children: children_vec,
+        data: None,
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/rss",
     responses(
-        (status = 200, body = Vec<rss_sources::Model>),
+        (status = 200, body = RssTreeVec),
     ),
     tag = FEED_TAG,
 )]
 pub async fn rss(
     State(state): State<AppState>,
     User(_user): User,
-) -> Result<ApiResponse<Vec<rss_sources::Model>>, ApiError> {
+) -> Result<ApiResponse<RssTreeVec>, ApiError> {
     tracing::info!("list rss sources");
 
     let rss_sources = RssSourcesQuery::list_all(&state.conn)
@@ -34,7 +123,10 @@ pub async fn rss(
             code: ApiCode::COMMON_DATABASE_ERROR,
         })?;
 
-    Ok(ApiResponse::data(rss_sources))
+    let tree = convert_to_tree(rss_sources);
+    let tree_vec = convert_hashmap_to_vec(tree);
+    Ok(ApiResponse::data(tree_vec))
+    // Ok(ApiResponse::data(rss_sources))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

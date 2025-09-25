@@ -11,9 +11,9 @@ api_prefix = "/api/v1/feed"
 url = "postgresql://postgres:testpassword@127.0.0.1:5432/wisland_feed?sslmode=disable"
 allow_migrate = true
 allow_migration_fail = true
-timeout_ms = 5000 # 5s
-idle_timeout_ms = 600_000 # 10 mins
-acquire_timeout_ms = 3000 # 3s
+timeout_ms = 5000                                                                      # 5s
+idle_timeout_ms = 600_000                                                              # 10 mins
+acquire_timeout_ms = 3000                                                              # 3s
 max_connections = 20
 min_connections = 5
 
@@ -35,21 +35,24 @@ verifier_user_prompt = "## question:\n{question}\n\n## search result:\n{search_r
 serp_api_key = "fa709c7ccbd9f970e4ad48da07f7ad4e6a6b0ac30e8f50682dba30f8a7d47e02"
 
 [oss]
-access_key_id="access_key_id"
-access_key_secret="access_key_secret"
-bucket="bucket"
-endpoint="endpoint"
-prefix="prefix"
+access_key_id = "access_key_id"
+access_key_secret = "access_key_secret"
+bucket = "bucket"
+endpoint = "endpoint"
+prefix = "prefix"
 
 [rss]
-max_prompt_number=10
-max_rss_paper=1000
-redis_prefix="wisland-feed"
-only_log_failed_jobs=true
+max_prompt_number = 10
+max_rss_paper = 1000
+only_log_failed_jobs = true
+arxiv_header_image = "https://info.arxiv.org/brand/images/brand-logo-primary.jpg"
+temp_download_path = "/temp"
 
 [rss.feed_redis]
-url = "redis://127.0.0.1:16379/0"
+url = ""
 pool_size = 16
+redis_key_default_expire = 600
+redis_prefix = "wisland-feed"
 
 # Named workers mapping for easier .env override by name
 [rss.workers.verify_papers]

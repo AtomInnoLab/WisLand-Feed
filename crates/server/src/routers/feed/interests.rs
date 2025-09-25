@@ -86,7 +86,7 @@ pub async fn set_interests(
         state.redis.apalis_conn,
     )
     .await
-    .map_err(|e| ApiError::FeedErr {
+    .map_err(|e| ApiError::FeedError {
         message: format!("update_user_interest_metadata_once: {e}"),
         stage: "update_user_interest_metadata_once".to_string(),
         code: ApiCode::COMMON_FEED_ERROR,

@@ -40,35 +40,22 @@ redis = { workspace = true }
 apalis = { version = "0.7.1", features = ["retry", "limit", "timeout"] }
 apalis-redis = "0.7.1"
 
-conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "conf", features = ["feed", "agent_redis"] }
-common = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "common" }
-search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "search", default-features = false, features = [
+# 统一使用 SSH git 源作为基础声明
+conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", features = [
+    "feed",
+    "agent_redis",
+] }
+common = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev" }
+search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",
 ] }
-protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "protocol", default-features = false, features = [
+protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",
-    "redis"
+    "redis",
 ] }
-seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "seaorm-db", default-features = false, features = [
+seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",
 ] }
-feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", version = "*", package = "feed", default-features = false, features = ["redis"]}
-
-
-
-# conf = { path = "../../../WisAgent/crates/conf", version = "*", package = "conf", features = [
-#     "feed",
-#     "agent_redis"
-# ] }
-# common = { path = "../../../WisAgent/crates/common", version = "*", package = "common" }
-# search = { path = "../../../WisAgent/crates/search", version = "*", package = "search", default-features = false, features = [
-#     "feed",
-# ] }
-# protocol = { path = "../../../WisAgent/crates/protocol", version = "*", package = "protocol", default-features = false, features = [
-#     "feed",
-#     "redis",
-# ] }
-# seaorm-db = { path = "../../../WisAgent/crates/seaorm-db", version = "*", package = "seaorm-db", default-features = false, features = [
-#     "feed",
-# ] }
-# feed = { path = "../../../WisAgent/crates/feed", version = "*", package = "feed", default-features = false, features = ["redis"]}
+feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
+    "redis",
+] }
