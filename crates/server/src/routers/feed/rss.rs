@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -25,7 +25,7 @@ pub enum RssNode {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RssTree {
     pub name: String,
-    pub children: HashMap<String, RssNode>,
+    pub children: BTreeMap<String, RssNode>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -39,7 +39,7 @@ pub struct RssTreeVec {
 pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTree {
     let mut tree = RssTree {
         name: "root".to_string(),
-        children: HashMap::new(),
+        children: BTreeMap::new(),
     };
     for rss_source in rss_sources {
         let mut levels = vec![rss_source.channel.clone()];
@@ -59,7 +59,7 @@ pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTree {
                         level.to_string(),
                         RssNode::Branch(Box::new(RssTree {
                             name: level.to_string(),
-                            children: HashMap::new(),
+                            children: BTreeMap::new(),
                         })),
                     );
                 }
@@ -73,7 +73,7 @@ pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTree {
     tree
 }
 
-pub fn convert_hashmap_to_vec(tree: RssTree) -> RssTreeVec {
+pub fn convert_btreemap_to_vec(tree: RssTree) -> RssTreeVec {
     let mut children_vec = Vec::new();
 
     for (key, node) in tree.children {
@@ -84,7 +84,7 @@ pub fn convert_hashmap_to_vec(tree: RssTree) -> RssTreeVec {
                 children: vec![],
             },
             RssNode::Branch(branch_tree) => {
-                let converted_tree = convert_hashmap_to_vec(*branch_tree);
+                let converted_tree = convert_btreemap_to_vec(*branch_tree);
                 RssTreeVec {
                     name: key,
                     children: converted_tree.children,
@@ -124,7 +124,7 @@ pub async fn rss(
         })?;
 
     let tree = convert_to_tree(rss_sources);
-    let tree_vec = convert_hashmap_to_vec(tree);
+    let tree_vec = convert_btreemap_to_vec(tree);
     Ok(ApiResponse::data(tree_vec))
     // Ok(ApiResponse::data(rss_sources))
 }
