@@ -67,7 +67,6 @@ redis = { version = "0.32", features = ["bb8", "tokio-rustls-comp"] }
 
 # misc
 itertools = "0.14"
-regex = "1"
 chrono = "0.4"
 md5 = "0.8"
 typed-builder = "0.21.0"
