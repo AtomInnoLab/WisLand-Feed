@@ -103,3 +103,10 @@ concurrency = 1
 timeout_secs = 36000
 retry = 1
 cron = "@daily"
+
+[rss.workers.clean_redis]
+name = "clean_redis"
+concurrency = 1
+timeout_secs = 36000
+retry = 1
+cron = "@daily"
