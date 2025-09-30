@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use conf::config::{AppConfig, app_config};
+use feed::redis::pubsub::RedisPubSubManager;
 use sea_orm::DatabaseConnection;
 use seaorm_db::connection::get_db;
 use tokio::signal::{self, unix::SignalKind};
@@ -18,6 +19,7 @@ pub struct AppState {
 pub struct RedisService {
     pub pool: bb8::Pool<bb8_redis::RedisConnectionManager>,
     pub apalis_conn: apalis_redis::ConnectionManager,
+    pub pubsub_manager: RedisPubSubManager,
 }
 impl AppState {
     pub async fn new() -> Self {
@@ -29,6 +31,7 @@ impl AppState {
                 apalis_conn: apalis_redis::connect(config.rss.feed_redis.url.as_str())
                     .await
                     .expect("Could not connect redis"),
+                pubsub_manager: RedisPubSubManager::new(config.rss.feed_redis.url.as_str()).await,
             },
             config,
         }

@@ -3,11 +3,13 @@ use crate::model::page::{Page, Pagination};
 use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state::AppState};
 use axum::Json;
 use axum::extract::{Query, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use chrono::{DateTime, FixedOffset, Local, TimeZone};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
+use futures::stream::{self, Stream};
 use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
 use seaorm_db::query::feed::user_paper_verifications::{
     ListVerifiedParams, MarkReadParams, UserPaperVerificationsQuery, VerifiedPaperItem,
@@ -25,6 +27,13 @@ use seaorm_db::{
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Duration;
+use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 #[derive(Debug, Deserialize, ToSchema, Clone, Copy)]
@@ -346,4 +355,213 @@ pub async fn batch_delete(
             })?;
 
     Ok(ApiResponse::data(affected))
+}
+
+// SSE 消息处理器，用于将 Redis PubSub 消息转发到 SSE 流
+struct SseMessageHandler {
+    user_id: String,
+    channel: String,
+    sender: broadcast::Sender<String>,
+}
+
+impl SseMessageHandler {
+    fn new(user_id: String, channel: String, sender: broadcast::Sender<String>) -> Self {
+        Self {
+            user_id,
+            channel,
+            sender,
+        }
+    }
+}
+
+impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
+    fn event_name(&self) -> String {
+        self.channel.clone()
+    }
+
+    fn handle(&self, message: String) {
+        tracing::info!(
+            "Received Redis message for user {}: {}",
+            self.user_id,
+            message
+        );
+
+        // 将 Redis 消息转发到 SSE 流
+        if self.sender.send(message).is_err() {
+            tracing::warn!(
+                "Failed to send message to SSE stream for user {}",
+                self.user_id
+            );
+        }
+    }
+}
+
+// 连接状态监控器
+struct ConnectionMonitor {
+    user_id: i64,
+    is_connected: Arc<AtomicBool>,
+    pubsub_manager: feed::redis::pubsub::RedisPubSubManager,
+    channel: String,
+}
+
+impl ConnectionMonitor {
+    fn new(
+        user_id: i64,
+        pubsub_manager: feed::redis::pubsub::RedisPubSubManager,
+        channel: String,
+    ) -> Self {
+        Self {
+            user_id,
+            is_connected: Arc::new(AtomicBool::new(true)),
+            pubsub_manager,
+            channel,
+        }
+    }
+
+    fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for ConnectionMonitor {
+    fn drop(&mut self) {
+        self.is_connected.store(false, Ordering::Relaxed);
+        tracing::info!(
+            "SSE connection dropped for user: {}, performing cleanup...",
+            self.user_id
+        );
+
+        // 从 Redis PubSub 取消订阅
+        let pubsub_manager = self.pubsub_manager.clone();
+        let channel = self.channel.clone();
+        let user_id = self.user_id;
+
+        tokio::spawn(async move {
+            if let Err(e) = pubsub_manager.unsubscribe(&channel).await {
+                tracing::error!(
+                    "Failed to unsubscribe from Redis channel '{}' for user {}: {}",
+                    channel,
+                    user_id,
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Successfully unsubscribed from Redis channel '{}' for user {}",
+                    channel,
+                    user_id
+                );
+            }
+        });
+
+        tracing::info!("Cleanup completed for user: {}", self.user_id);
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/stream-verify",
+    responses(
+        (status = 200, description = "SSE 连接测试"),
+    ),
+    tag = FEED_TAG,
+)]
+pub async fn stream_verify(
+    State(state): State<AppState>,
+    User(user): User,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    tracing::info!("SSE connection established for user: {}", user.id);
+    let user_id = user.id;
+    let channel = state.config.rss.verify_papers_channel.clone();
+
+    // 创建连接监控器，当 SSE 流结束时会自动触发 Drop
+    let monitor =
+        ConnectionMonitor::new(user_id, state.redis.pubsub_manager.clone(), channel.clone());
+
+    // 创建广播通道用于 Redis PubSub 消息转发
+    let (tx, rx) = broadcast::channel::<String>(100);
+
+    // 创建消息处理器，将 Redis 消息转发到 SSE 流
+    let handler = Box::new(SseMessageHandler::new(user_id.to_string(), channel, tx));
+
+    // 在独立的任务中启动监听器，避免阻塞
+    let pubsub_manager = state.redis.pubsub_manager.clone();
+    tokio::spawn(async move {
+        pubsub_manager.add_listener(handler).await;
+    });
+
+    let stream = stream::unfold(
+        (0, monitor, rx),
+        move |(mut counter, monitor, mut receiver)| async move {
+            // 检查连接是否仍然活跃
+            if !monitor.is_connected() {
+                tracing::info!("Connection lost for user: {}", user_id);
+                return None;
+            }
+
+            // 使用 tokio::select! 同时监听定时器和 Redis 消息
+            tokio::select! {
+                // 定时发送心跳消息
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    counter += 1;
+
+                    let event_data = serde_json::json!({
+                        "type": "heartbeat",
+                        "message": format!("Heartbeat #{}", counter),
+                        "user_id": user_id,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                        "counter": counter,
+                        "status": "connected"
+                    });
+
+                    Some((
+                        Ok(Event::default()
+                            .event("heartbeat")
+                            .data(format!("data: {event_data}"))),
+                        (counter, monitor, receiver),
+                    ))
+                }
+                // 接收 Redis PubSub 消息
+                result = receiver.recv() => {
+                    match result {
+                        Ok(message) => {
+                            tracing::info!("Forwarding Redis message to SSE for user {}: {}", user_id, message);
+
+                            let event_data = serde_json::json!({
+                                "type": "verify_paper_success",
+                                "message": message,
+                                "user_id": user_id,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                "status": "connected"
+                            });
+
+                            Some((
+                                Ok(Event::default()
+                                    .event("verify_paper_success")
+                                    .data(format!("data: {event_data}"))),
+                                (counter, monitor, receiver),
+                            ))
+                        }
+                        Err(_) => {
+                            tracing::warn!("Redis message receiver closed for user {}", user_id);
+                            // 继续运行，只是不再接收 Redis 消息
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            Some((
+                                Ok(Event::default()
+                                    .event("error")
+                                    .data(format!("data: {}", serde_json::json!({
+                                        "type": "error",
+                                        "message": "Redis message channel closed",
+                                        "user_id": user_id,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })))),
+                                (counter, monitor, receiver),
+                            ))
+                        }
+                    }
+                }
+            }
+        },
+    );
+
+    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
 }

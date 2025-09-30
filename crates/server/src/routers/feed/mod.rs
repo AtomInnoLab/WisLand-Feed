@@ -28,4 +28,5 @@ pub fn feed_routers() -> OpenApiRouter<AppState> {
         .routes(routes!(feeds::unverified_count_info))
         .routes(routes!(feeds::unread_count))
         .routes(routes!(feeds::batch_delete))
+        .routes(routes!(feeds::stream_verify))
 }
