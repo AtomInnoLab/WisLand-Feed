@@ -3131,6 +3131,8 @@ version = "0.0.1"
 dependencies = [
  "conf",
  "opendal",
+ "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -4625,6 +4627,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snafu",
+ "textdistance",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -5417,6 +5420,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "textdistance"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa672c55ab69f787dbc9126cc387dbe57fdd595f585e4524cf89018fa44ab819"
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5640,6 +5649,7 @@ checksum = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",

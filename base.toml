@@ -49,6 +49,8 @@ pdf_image_width = 2480
 pdf_image_height = 3508
 arxiv_header_image = "https://info.arxiv.org/brand/images/brand-logo-primary.jpg"
 raw_data_upload_dir = "data"
+verify_papers_channel = "verify_papers"
+verify_user_sorted_set = "verify_user_sorted_set"
 
 [rss.feed_redis]
 url = ""
@@ -65,6 +67,13 @@ retry = 1
 
 [rss.workers.verify_one_paper_prompt_pair]
 name = "verify_one_paper_prompt_pair"
+concurrency = 2
+timeout_secs = 600
+retry = 1
+
+
+[rss.workers.verify_single_user_one_paper]
+name = "verify_single_user_one_paper"
 concurrency = 2
 timeout_secs = 600
 retry = 1
@@ -106,6 +115,14 @@ cron = "@daily"
 
 [rss.workers.clean_redis]
 name = "clean_redis"
+concurrency = 1
+timeout_secs = 36000
+retry = 1
+cron = "@daily"
+
+
+[rss.workers.verify_user_scheduler]
+name = "verify_user_scheduler"
 concurrency = 1
 timeout_secs = 36000
 retry = 1
