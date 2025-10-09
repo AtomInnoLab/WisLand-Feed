@@ -12,8 +12,6 @@ use crate::{
     state::app_state::AppState,
 };
 
-use feed::dispatch;
-use feed::workers::update_user_interest_metadata::UpdateUserInterestMetadataInputOnce;
 
 #[utoipa::path(
     get,

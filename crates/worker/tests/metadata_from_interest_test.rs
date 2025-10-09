@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use feed::workers::base::RedisService;
 use seaorm_db::connection::get_db;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
