@@ -1,8 +1,7 @@
 services:
   wisland-feed-dev:
     build: .
-    ports:
-      - 3500:3500
+    network_mode: host
     volumes:
       - .:/app
       - ../WisAgent:/WisAgent

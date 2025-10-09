@@ -79,18 +79,18 @@ pub async fn set_interests(
         code: ApiCode::COMMON_DATABASE_ERROR,
     })?;
 
-    dispatch(
-        UpdateUserInterestMetadataInputOnce {
-            user_id: Some(user.id.to_string()),
-        },
-        state.redis.apalis_conn,
-    )
-    .await
-    .map_err(|e| ApiError::FeedError {
-        message: format!("update_user_interest_metadata_once: {e}"),
-        stage: "update_user_interest_metadata_once".to_string(),
-        code: ApiCode::COMMON_FEED_ERROR,
-    })?;
+    // dispatch(
+    //     UpdateUserInterestMetadataInputOnce {
+    //         user_id: Some(user.id.to_string()),
+    //     },
+    //     state.redis.apalis_conn,
+    // )
+    // .await
+    // .map_err(|e| ApiError::FeedError {
+    //     message: format!("update_user_interest_metadata_once: {e}"),
+    //     stage: "update_user_interest_metadata_once".to_string(),
+    //     code: ApiCode::COMMON_FEED_ERROR,
+    // })?;
 
     Ok(ApiResponse::data(ids))
 }
