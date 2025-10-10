@@ -30,8 +30,8 @@ fn init_test_tracing() {
     });
 }
 
-/// 测试多用户并发验证调度的公平性
-/// 通过Redis统计和数据库记录两个维度验证调度策略
+/// Test fairness of multi-user concurrent verification scheduling
+/// Verify scheduling strategy through Redis statistics and database records
 #[tokio::test]
 async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std::error::Error>> {
     init_test_tracing();
@@ -39,12 +39,12 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
     let db = get_db().await.clone();
     let config = app_config();
 
-    // 创建Redis连接
+    // Create Redis connection
     let redis_url = config.rss.feed_redis.url.clone();
     let manager = match bb8_redis::RedisConnectionManager::new(redis_url.clone()) {
         Ok(m) => m,
         Err(err) => {
-            warn!(error = %err, "跳过测试: 无法连接 Redis");
+            warn!(error = %err, "Skipping test: Unable to connect to Redis");
             return Ok(());
         }
     };
@@ -52,7 +52,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
     let redis_pool = match bb8::Pool::builder().max_size(10).build(manager).await {
         Ok(p) => p,
         Err(err) => {
-            warn!(error = %err, "跳过测试: 无法创建Redis连接池");
+            warn!(error = %err, "Skipping test: Unable to create Redis connection pool");
             return Ok(());
         }
     };
@@ -60,33 +60,36 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
     let _apalis_conn = match apalis_redis::connect(redis_url.as_str()).await {
         Ok(conn) => conn,
         Err(err) => {
-            warn!(error = %err, "跳过测试: 无法创建Apalis Redis连接");
+            warn!(error = %err, "Skipping test: Unable to create Apalis Redis connection");
             return Ok(());
         }
     };
 
-    info!("开始多用户并发验证公平性测试");
+    info!("Starting multi-user concurrent verification fairness test");
 
-    // 1. 准备测试数据
-    let test_user_ids: Vec<i64> = (3000000..3000005).collect(); // 5个测试用户
+    // 1. Prepare test data
+    let test_user_ids: Vec<i64> = (3000000..3000005).collect(); // 5 test users
     let user_count = test_user_ids.len();
 
-    // 获取现有的RSS源
+    // Get existing RSS sources
     let available_sources = RssSourcesQuery::list_all(&db).await?;
     if available_sources.is_empty() {
-        warn!("跳过测试: 数据库中没有RSS源");
+        warn!("Skipping test: No RSS sources in database");
         return Ok(());
     }
 
     let source_ids: Vec<i32> = available_sources.into_iter().map(|s| s.id).collect();
-    info!(source_count = source_ids.len(), "使用现有RSS源进行测试");
+    info!(
+        source_count = source_ids.len(),
+        "Using existing RSS sources for testing"
+    );
 
-    // 为每个用户创建兴趣和订阅
+    // Create interests and subscriptions for each user
     for &user_id in &test_user_ids {
         setup_user_test_data(&db, user_id, &source_ids, &config).await?;
     }
 
-    // 2. 创建VerifyManager
+    // 2. Create VerifyManager
     let verify_manager = VerifyManager::new(
         redis_pool.clone(),
         db.clone(),
@@ -95,23 +98,23 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
     )
     .await;
 
-    // 清理之前的状态
+    // Clean up previous state
     for &user_id in &test_user_ids {
         cleanup_user_verify_state(&verify_manager, user_id).await?;
     }
 
-    info!("测试环境准备完成，开始并发验证测试");
+    info!("Test environment prepared, starting concurrent verification test");
 
-    // 3. 记录验证前的基线数据
+    // 3. Record baseline data before verification
     let mut baseline_redis_stats = HashMap::new();
     let mut baseline_db_counts = HashMap::new();
 
     for &user_id in &test_user_ids {
-        // Redis基线
+        // Redis baseline
         let redis_info = match verify_manager.get_user_unverified_info(user_id).await {
             Ok(info) => info,
             Err(_) => {
-                // 如果获取失败，创建零值统计
+                // If retrieval fails, create zero-value statistics
                 feed::redis::verify_manager::UserVerifyInfo {
                     pending_unverify_count: 0,
                     success_count: 0,
@@ -124,15 +127,18 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         let redis_baseline = redis_info.success_count + redis_info.fail_count;
         baseline_redis_stats.insert(user_id, redis_baseline);
 
-        // 数据库基线
+        // Database baseline
         let db_records = UserPaperVerificationsQuery::list_by_user_id(&db, user_id).await?;
         let db_baseline = db_records.len();
         baseline_db_counts.insert(user_id, db_baseline);
 
-        info!(user_id, redis_baseline, db_baseline, "用户验证基线数据");
+        info!(
+            user_id,
+            redis_baseline, db_baseline, "User verification baseline data"
+        );
     }
 
-    // 4. 同时为所有用户添加到验证队列
+    // 4. Add all users to verification queue simultaneously
     let barrier = Arc::new(Barrier::new(user_count));
     let mut handles = vec![];
 
@@ -143,20 +149,20 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         let handle = tokio::spawn(async move {
             barrier_clone.wait().await;
 
-            info!(user_id, "用户开始请求验证");
+            info!(user_id, "User started verification request");
 
-            // 模拟用户调用verify接口：添加到验证队列
+            // Simulate user calling verify interface: add to verification queue
             let result = verify_manager_clone
-                .append_user_to_verify_list(user_id, Some(100))
+                .append_user_to_verify_list(user_id, Some(100), None)
                 .await;
 
             match result {
                 Ok(_) => {
-                    info!(user_id, "用户成功添加到验证队列");
+                    info!(user_id, "User successfully added to verification queue");
                     Ok(user_id)
                 }
                 Err(e) => {
-                    warn!(user_id, error = %e, "用户添加验证队列失败");
+                    warn!(user_id, error = %e, "Failed to add user to verification queue");
                     Err(e)
                 }
             }
@@ -164,27 +170,27 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         handles.push(handle);
     }
 
-    // 等待所有用户添加完成
+    // Wait for all users to be added
     let results: Result<Vec<_>, _> = futures::future::try_join_all(handles).await;
     let _user_results = results?;
 
-    info!("所有用户已添加到验证队列，等待验证系统处理...");
+    info!("All users added to verification queue, waiting for verification system to process...");
 
-    // 5. 获取worker数量
+    // 5. Get worker count
     let worker_concurrency = config.rss.workers.verify_single_user_one_paper.concurrency;
     info!(
         worker_concurrency,
-        "verify_single_user_one_paper worker 并发数"
+        "verify_single_user_one_paper worker concurrency"
     );
 
-    // 6. 记录开始时间并等待验证系统工作
+    // 6. Record start time and wait for verification system to work
     let start_time = Instant::now();
-    let wait_duration = Duration::from_secs(90); // 延长等待时间到90秒
+    let wait_duration = Duration::from_secs(90); // Extend wait time to 90 seconds
     let check_interval = Duration::from_secs(5);
     let mut elapsed = Duration::ZERO;
 
     info!(
-        "等待 {:?}，每 {:?} 检查一次进度",
+        "Waiting {:?}, checking progress every {:?}",
         wait_duration, check_interval
     );
 
@@ -192,9 +198,9 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         tokio::time::sleep(check_interval).await;
         elapsed += check_interval;
 
-        info!("已等待 {:?} / {:?}", elapsed, wait_duration);
+        info!("Waited {:?} / {:?}", elapsed, wait_duration);
 
-        // 检查当前进度
+        // Check current progress
         for &user_id in &test_user_ids {
             if let Ok(redis_info) = verify_manager.get_user_unverified_info(user_id).await {
                 let current_redis = redis_info.success_count + redis_info.fail_count;
@@ -207,35 +213,35 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
                         redis_new,
                         processing = redis_info.processing_count,
                         pending = redis_info.pending_unverify_count,
-                        "用户验证进度"
+                        "User verification progress"
                     );
                 }
             }
         }
     }
 
-    // 7. 计算总的处理时间
+    // 7. Calculate total processing time
     let total_elapsed = start_time.elapsed();
     info!(
         total_elapsed_secs = total_elapsed.as_secs_f64(),
-        "验证处理完成，总耗时"
+        "Verification processing completed, total time taken"
     );
 
-    // 8. 收集最终的验证结果统计
-    info!("收集最终验证结果统计...");
+    // 8. Collect final verification result statistics
+    info!("Collecting final verification result statistics...");
 
     let mut final_redis_stats = HashMap::new();
     let mut final_db_counts = HashMap::new();
 
     for &user_id in &test_user_ids {
-        // Redis维度：调度器分配统计
+        // Redis dimension: scheduler allocation statistics
         let redis_info = verify_manager.get_user_unverified_info(user_id).await?;
         let current_redis = redis_info.success_count + redis_info.fail_count;
         let baseline_redis = baseline_redis_stats.get(&user_id).copied().unwrap_or(0);
         let redis_new = current_redis.saturating_sub(baseline_redis);
         final_redis_stats.insert(user_id, redis_new);
 
-        // 数据库维度：实际验证记录数
+        // Database dimension: actual verification record count
         let db_records = UserPaperVerificationsQuery::list_by_user_id(&db, user_id).await?;
         let current_db = db_records.len();
         let baseline_db = baseline_db_counts.get(&user_id).copied().unwrap_or(0);
@@ -250,14 +256,14 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
             redis_fail = redis_info.fail_count,
             redis_processing = redis_info.processing_count,
             redis_pending = redis_info.pending_unverify_count,
-            "用户最终验证统计"
+            "User final verification statistics"
         );
     }
 
-    // 9. 分析调度公平性
-    info!("分析调度公平性...");
+    // 9. Analyze scheduling fairness
+    info!("Analyzing scheduling fairness...");
 
-    // Redis维度分析
+    // Redis dimension analysis
     let redis_values: Vec<i64> = final_redis_stats.values().copied().collect();
     let total_redis_new: i64 = redis_values.iter().sum();
 
@@ -274,20 +280,20 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
         info!(
             total_redis_new,
-            max_redis, min_redis, redis_ratio, "Redis调度统计分布"
+            max_redis, min_redis, redis_ratio, "Redis scheduling statistics distribution"
         );
 
         if redis_ratio.is_finite() && redis_ratio > 3.0 {
             warn!(
                 redis_ratio,
-                "Redis调度分布可能不够公平，最大/最小比例超过 3:1"
+                "Redis scheduling distribution may not be fair enough, max/min ratio exceeds 3:1"
             );
         }
     } else {
-        warn!("Redis维度没有新的验证活动");
+        warn!("No new verification activity in Redis dimension");
     }
 
-    // 数据库维度分析
+    // Database dimension analysis
     let db_values: Vec<usize> = final_db_counts.values().copied().collect();
     let total_db_new: usize = db_values.iter().sum();
 
@@ -302,29 +308,32 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
             1.0
         };
 
-        info!(total_db_new, max_db, min_db, db_ratio, "数据库验证记录分布");
+        info!(
+            total_db_new,
+            max_db, min_db, db_ratio, "Database verification record distribution"
+        );
 
         if db_ratio.is_finite() && db_ratio > 3.0 {
             warn!(
                 db_ratio,
-                "数据库验证分布可能不够公平，最大/最小比例超过 3:1"
+                "Database verification distribution may not be fair enough, max/min ratio exceeds 3:1"
             );
         }
     } else {
-        warn!("数据库维度没有新的验证记录");
+        warn!("No new verification records in database dimension");
     }
 
-    // 10. 统计 worker 处理速度
-    info!("统计 worker 处理速度...");
+    // 10. Calculate worker processing speed
+    info!("Calculating worker processing speed...");
 
     let total_elapsed_secs = total_elapsed.as_secs_f64();
     let total_verified = total_db_new.max(total_redis_new as usize);
 
     if total_verified > 0 && total_elapsed_secs > 0.0 {
-        // 总的处理速度（所有worker合计）
+        // Total processing speed (all workers combined)
         let total_throughput = total_verified as f64 / total_elapsed_secs;
 
-        // 单个worker的平均处理速度
+        // Average processing speed per worker
         let per_worker_throughput = if worker_concurrency > 0 {
             total_throughput / worker_concurrency as f64
         } else {
@@ -340,14 +349,14 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
             total_throughput_per_min = format!("{:.2} papers/min", total_throughput * 60.0),
             per_worker_throughput_per_min =
                 format!("{:.2} papers/min", per_worker_throughput * 60.0),
-            "Worker 处理速度统计"
+            "Worker processing speed statistics"
         );
     } else {
-        warn!("无法统计处理速度：没有验证活动或时间为0");
+        warn!("Unable to calculate processing speed: no verification activity or time is 0");
     }
 
-    // 11. 清理测试数据
-    info!("清理测试数据...");
+    // 11. Clean up test data
+    info!("Cleaning up test data...");
     for &user_id in &test_user_ids {
         cleanup_user_test_data(&db, user_id).await?;
         cleanup_user_verify_state(&verify_manager, user_id).await?;
@@ -355,19 +364,22 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
     info!(
         total_users = user_count,
-        total_redis_new, total_db_new, total_verified, "多用户并发验证公平性测试完成"
+        total_redis_new,
+        total_db_new,
+        total_verified,
+        "Multi-user concurrent verification fairness test completed"
     );
 
-    // 基本断言：至少有一个维度应该有验证活动
+    // Basic assertion: at least one dimension should have verification activity
     assert!(
         total_redis_new > 0 || total_db_new > 0,
-        "验证系统应该在Redis或数据库维度有验证活动，或者需要更长的等待时间"
+        "Verification system should have verification activity in Redis or database dimension, or needs longer wait time"
     );
 
     Ok(())
 }
 
-/// 为用户创建测试数据（兴趣和订阅）
+/// Create test data for user (interests and subscriptions)
 async fn setup_user_test_data(
     db: &sea_orm::DatabaseConnection,
     user_id: i64,
@@ -376,7 +388,7 @@ async fn setup_user_test_data(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
 
-    // 创建用户兴趣
+    // Create user interests
     let mut interests = vec![
         "machine learning".to_string(),
         "artificial intelligence".to_string(),
@@ -388,7 +400,7 @@ async fn setup_user_test_data(
     interests.shuffle(&mut rng);
     let selected_interests: Vec<String> = interests
         .into_iter()
-        .take(2) // 每个用户选择2个兴趣
+        .take(2) // Each user selects 2 interests
         .collect();
 
     UserInterestsQuery::replace_many(
@@ -399,10 +411,10 @@ async fn setup_user_test_data(
     )
     .await?;
 
-    // 从现有源中随机选择订阅
+    // Randomly select subscriptions from existing sources
     let mut sources = source_ids.to_vec();
     sources.shuffle(&mut rng);
-    let max_sources = sources.len().clamp(1, 3); // 最多3个，最少1个
+    let max_sources = sources.len().clamp(1, 3); // Maximum 3, minimum 1
     let selected_sources: Vec<i32> = sources.into_iter().take(max_sources).collect();
 
     RssSubscriptionsQuery::replace_many(db, user_id, selected_sources.clone()).await?;
@@ -411,33 +423,33 @@ async fn setup_user_test_data(
         user_id,
         interests = ?selected_interests,
         sources = ?selected_sources,
-        "为用户创建测试数据"
+        "Created test data for user"
     );
 
     Ok(())
 }
 
-/// 清理用户验证状态
+/// Clean up user verification state
 async fn cleanup_user_verify_state(
     _verify_manager: &VerifyManager,
     user_id: i64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: 实现清理验证状态的逻辑
-    info!(user_id, "清理用户验证状态");
+    // TODO: Implement logic to clean up verification state
+    info!(user_id, "Cleaning up user verification state");
     Ok(())
 }
 
-/// 清理用户测试数据
+/// Clean up user test data
 async fn cleanup_user_test_data(
     db: &sea_orm::DatabaseConnection,
     user_id: i64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = app_config();
 
-    // 清空兴趣和订阅
+    // Clear interests and subscriptions
     UserInterestsQuery::replace_many(db, user_id, vec![], config.llm.model.clone()).await?;
     RssSubscriptionsQuery::replace_many(db, user_id, vec![]).await?;
 
-    info!(user_id, "清理用户测试数据完成");
+    info!(user_id, "User test data cleanup completed");
     Ok(())
 }

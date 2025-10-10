@@ -87,6 +87,11 @@ pub struct DeletePapersRequest {
     pub ids: Vec<i32>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct StreamVerifyRequest {
+    pub channel: Option<String>,
+}
+
 #[utoipa::path(
     get,
     path = "/unverified-count-info",
@@ -116,7 +121,7 @@ pub async fn unverified_count_info(
     path = "/unread-count",
     request_body = FeedRequest,
     params(
-        ("channel" = String, Path, description = "频道"),
+        ("channel" = String, Path, description = "Channel"),
     ),
     responses(
         (status = 200, body = u64),
@@ -144,7 +149,7 @@ pub async fn unread_count(
     path = "/verify",
     request_body = VerifyRequest,
     params(
-        ("channel" = String, Path, description = "频道"),
+        ("channel" = String, Path, description = "Channel"),
     ),
     responses(
         (status = 200, body = bool),
@@ -179,7 +184,7 @@ pub async fn verify(
     get,
     path = "/verify-status",
     params(
-        ("channel" = String, Path, description = "频道"),
+        ("channel" = String, Path, description = "Channel"),
     ),
     responses(
         (status = 200, body = JobDetail),
@@ -226,10 +231,10 @@ pub async fn all_verified_papers(
 ) -> Result<ApiResponse<AllVerifiedPapersResponse>, ApiError> {
     tracing::info!("list all verified papers");
 
-    // 处理时间范围，如果开始时间没有指定，则设置为今天的零点
+    // Process time range, if start time is not specified, set to today's midnight
     let time_range = payload.time_range.map(|tr| {
         let start = tr.start.unwrap_or_else(|| {
-            // 获取今天的零点（本地时间转换为固定偏移时间）
+            // Get today's midnight (convert local time to fixed offset time)
             let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
             Local
                 .from_local_datetime(&today_start)
@@ -259,7 +264,7 @@ pub async fn all_verified_papers(
         code: ApiCode::COMMON_DATABASE_ERROR,
     })?;
 
-    // 查询用户兴趣与订阅源
+    // Query user interests and subscription sources
     let interest_items = UserInterestsQuery::list_by_user_id(&state.conn, user.id)
         .await
         .context(DbErrSnafu {
@@ -360,7 +365,7 @@ pub async fn batch_delete(
     Ok(ApiResponse::data(affected))
 }
 
-// SSE 消息处理器，用于将 Redis PubSub 消息转发到 SSE 流
+// SSE message handler for forwarding Redis PubSub messages to SSE stream
 struct SseMessageHandler {
     user_id: String,
     channel: String,
@@ -385,7 +390,7 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
     fn handle(&self, message: String) {
         tracing::info!("Received Redis message for user {}", self.user_id);
 
-        // 将 Redis 消息转发到 SSE 流
+        // Forward Redis message to SSE stream
         if self.sender.send(message).is_err() {
             tracing::warn!(
                 "Failed to send message to SSE stream for user {}",
@@ -395,7 +400,7 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
     }
 }
 
-// 连接状态监控器
+// Connection status monitor
 struct ConnectionMonitor {
     user_id: i64,
     is_connected: Arc<AtomicBool>,
@@ -430,7 +435,7 @@ impl Drop for ConnectionMonitor {
             self.user_id
         );
 
-        // 从 Redis PubSub 取消订阅
+        // Unsubscribe from Redis PubSub
         let pubsub_manager = self.pubsub_manager.clone();
         let channel = self.channel.clone();
         let user_id = self.user_id;
@@ -457,20 +462,22 @@ impl Drop for ConnectionMonitor {
 }
 
 #[utoipa::path(
-    get,
+    post,
     path = "/stream-verify",
+    request_body = StreamVerifyRequest,
     responses(
-        (status = 200, description = "SSE 连接测试"),
+        (status = 200, description = "SSE connection test"),
     ),
     tag = FEED_TAG,
 )]
 pub async fn stream_verify(
     State(state): State<AppState>,
     User(user): User,
+    Json(payload): Json<StreamVerifyRequest>,
 ) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>> {
     tracing::info!("SSE connection established for user: {}", user.id);
     let user_id = user.id;
-    let channel = state.config.rss.verify_papers_channel.clone();
+    let verify_papers_sub_channel = state.config.rss.verify_papers_channel.clone();
 
     let result = run_update_user_interest_metadata(
         Some(user_id.to_string()),
@@ -484,7 +491,7 @@ pub async fn stream_verify(
             "Failed to update user interest metadata: {}",
             result.err().unwrap()
         );
-        // 返回错误流
+        // Return error stream
         return Sse::new(Box::pin(stream::once(async {
             Err(ApiError::CustomError {
                 message: "Failed to update user interest metadata".to_string(),
@@ -495,17 +502,24 @@ pub async fn stream_verify(
         tracing::info!("Successfully updated user interest metadata");
     }
 
-    // 创建连接监控器，当 SSE 流结束时会自动触发 Drop
-    let monitor =
-        ConnectionMonitor::new(user_id, state.redis.pubsub_manager.clone(), channel.clone());
+    // Create connection monitor, automatically triggers Drop when SSE stream ends
+    let monitor = ConnectionMonitor::new(
+        user_id,
+        state.redis.pubsub_manager.clone(),
+        verify_papers_sub_channel.clone(),
+    );
 
-    // 创建广播通道用于 Redis PubSub 消息转发
+    // Create broadcast channel for Redis PubSub message forwarding
     let (tx, rx) = broadcast::channel::<String>(100);
 
-    // 创建消息处理器，将 Redis 消息转发到 SSE 流
-    let handler = Box::new(SseMessageHandler::new(user_id.to_string(), channel, tx));
+    // Create message handler to forward Redis messages to SSE stream
+    let handler = Box::new(SseMessageHandler::new(
+        user_id.to_string(),
+        verify_papers_sub_channel,
+        tx,
+    ));
 
-    // 在独立的任务中启动监听器，避免阻塞
+    // Start listener in separate task to avoid blocking
     let pubsub_manager = state.redis.pubsub_manager.clone();
     tokio::spawn(async move {
         pubsub_manager.add_listener(handler).await;
@@ -522,20 +536,20 @@ pub async fn stream_verify(
     let stream = stream::unfold(
         (monitor, rx, verify_manager.clone()),
         move |(monitor, mut receiver, verify_manager_clone)| async move {
-            // 检查连接是否仍然活跃
+            // Check if connection is still active
             if !monitor.is_connected() {
                 tracing::info!("Connection lost for user: {}", user_id);
                 return None;
             }
 
-            // 使用 tokio::select! 同时监听定时器、Redis 消息和关闭信号
+            // Use tokio::select! to simultaneously listen to timer, Redis messages and shutdown signal
             tokio::select! {
-                // 监听关闭信号
+                // Listen for shutdown signal
                 _ = signal::ctrl_c() => {
                     tracing::info!("SSE stream received shutdown signal for user: {}", user_id);
                     None
                 }
-                // 定时发送心跳消息
+                // Send heartbeat message periodically
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
 
                     let event_data = serde_json::json!({
@@ -552,13 +566,13 @@ pub async fn stream_verify(
                         (monitor, receiver, verify_manager_clone),
                     ))
                 }
-                // 接收 Redis PubSub 消息
+                // Receive Redis PubSub messages
                 result = receiver.recv() => {
                     match result {
                         Ok(message) => {
                             tracing::info!("Forwarding Redis message to SSE for user {}", user_id);
 
-                            // 尝试解析Redis消息为JSON，如果失败则作为字符串处理
+                            // Try to parse Redis message as JSON, if failed treat as string
                             let parsed_message = serde_json::from_str::<serde_json::Value>(&message)
                                 .unwrap_or_else(|_| serde_json::Value::String(message.clone()));
                             let verify_info = verify_manager_clone.get_user_unverified_info(user_id).await.unwrap();
@@ -580,7 +594,7 @@ pub async fn stream_verify(
                         }
                         Err(_) => {
                             tracing::warn!("Redis message receiver closed for user {}", user_id);
-                            // 结束 SSE 流（触发 Drop 清理与取消订阅），避免无限循环与阻塞优雅关闭
+                            // End SSE stream (trigger Drop cleanup and unsubscribe), avoid infinite loop and blocking graceful shutdown
                             None
                         }
                     }
@@ -590,7 +604,11 @@ pub async fn stream_verify(
     );
 
     if let Err(e) = verify_manager
-        .append_user_to_verify_list(user_id, Some(state.config.rss.max_rss_paper as i32))
+        .append_user_to_verify_list(
+            user_id,
+            Some(state.config.rss.max_rss_paper as i32),
+            payload.channel,
+        )
         .await
     {
         tracing::error!("Failed to append user to verify list: {}", e);
