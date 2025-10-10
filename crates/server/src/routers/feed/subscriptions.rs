@@ -52,7 +52,7 @@ pub struct SubscriptionCreateOneRequest {
     path = "/subscriptions",
     request_body = SubscriptionsCreateRequest,
     responses(
-        (status = 200, description = "批量订阅成功，返回新增或已存在的订阅ID列表", body = Vec<i64>),
+        (status = 200, description = "Batch subscription successful, returns list of new or existing subscription IDs", body = Vec<i64>),
     ),
     tag = FEED_TAG,
 )]
@@ -90,7 +90,7 @@ pub async fn batch_subscriptions(
     path = "/subscriptions/one",
     request_body = SubscriptionCreateOneRequest,
     responses(
-        (status = 200, description = "新增单个订阅，返回订阅ID（若已存在或源不存在则为空）", body = Option<i64>),
+        (status = 200, description = "Add single subscription, returns subscription ID (empty if already exists or source doesn't exist)", body = Option<i64>),
     ),
     tag = FEED_TAG,
 )]
@@ -119,10 +119,10 @@ pub async fn subscriptions_create_one(
     delete,
     path = "/subscriptions/{subscription_id}",
     params(
-        ("subscription_id" = i64, Path, description = "订阅记录ID"),
+        ("subscription_id" = i64, Path, description = "Subscription record ID"),
     ),
     responses(
-        (status = 200, description = "删除单个订阅", body = bool),
+        (status = 200, description = "Delete single subscription", body = bool),
     ),
     tag = FEED_TAG,
 )]

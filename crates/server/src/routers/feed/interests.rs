@@ -12,12 +12,11 @@ use crate::{
     state::app_state::AppState,
 };
 
-
 #[utoipa::path(
     get,
     path = "/interests",
     responses(
-        (status = 200, description = "获取当前用户偏好列表，仅返回兴趣名称", body = Vec<String>),
+        (status = 200, description = "Get current user preference list, returns only interest names", body = Vec<String>),
     ),
     tag = FEED_TAG,
 )]
@@ -48,7 +47,7 @@ pub struct SetInterestsRequest {
     path = "/interests",
     request_body = SetInterestsRequest,
     responses(
-        (status = 200, description = "为当前用户设置多个偏好，返回新建记录ID列表", body = Vec<i64>),
+        (status = 200, description = "Set multiple preferences for current user, returns list of newly created record IDs", body = Vec<i64>),
     ),
     tag = FEED_TAG,
 )]

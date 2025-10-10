@@ -47,13 +47,13 @@ pub fn convert_to_tree(rss_sources: Vec<rss_sources::Model>) -> RssTree {
         let mut current_tree = &mut tree;
         for (i, level) in levels.iter().enumerate() {
             if i == levels.len() - 1 {
-                // 最后一个层级，直接插入 Leaf
+                // Last level, insert Leaf directly
                 current_tree
                     .children
                     .insert(level.to_string(), RssNode::Leaf(Box::new(rss_source)));
                 break;
             } else {
-                // 中间层级，创建 Branch
+                // Intermediate level, create Branch
                 if !current_tree.children.contains_key(level) {
                     current_tree.children.insert(
                         level.to_string(),
@@ -143,7 +143,7 @@ pub struct CreateRssSource {
     get,
     path = "/rss/{id}",
     params(
-        ("id" = i32, Path, description = "RSS 源 ID"),
+        ("id" = i32, Path, description = "RSS source ID"),
     ),
     responses(
         (status = 200, body = rss_sources::Model),
@@ -172,7 +172,7 @@ pub async fn rss_detail(
     path = "/rss",
     request_body = CreateRssSource,
     responses(
-        (status = 200, description = "创建成功，返回新建 ID", body = i32),
+        (status = 200, description = "Created successfully, returns new ID", body = i32),
     ),
     tag = FEED_TAG,
 )]
@@ -208,10 +208,10 @@ pub async fn rss_create(
     delete,
     path = "/rss/{id}",
     params(
-        ("id" = i32, Path, description = "RSS 源 ID"),
+        ("id" = i32, Path, description = "RSS source ID"),
     ),
     responses(
-        (status = 200, description = "删除成功", body = bool),
+        (status = 200, description = "Deleted successfully", body = bool),
     ),
     tag = FEED_TAG,
 )]
