@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use conf::config::app_config;
 use dotenvy::dotenv;
@@ -170,8 +170,16 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
     info!("所有用户已添加到验证队列，等待验证系统处理...");
 
-    // 5. 等待验证系统工作并定期检查进度
-    let wait_duration = Duration::from_secs(30);
+    // 5. 获取worker数量
+    let worker_concurrency = config.rss.workers.verify_single_user_one_paper.concurrency;
+    info!(
+        worker_concurrency,
+        "verify_single_user_one_paper worker 并发数"
+    );
+
+    // 6. 记录开始时间并等待验证系统工作
+    let start_time = Instant::now();
+    let wait_duration = Duration::from_secs(90); // 延长等待时间到90秒
     let check_interval = Duration::from_secs(5);
     let mut elapsed = Duration::ZERO;
 
@@ -206,7 +214,14 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         }
     }
 
-    // 6. 收集最终的验证结果统计
+    // 7. 计算总的处理时间
+    let total_elapsed = start_time.elapsed();
+    info!(
+        total_elapsed_secs = total_elapsed.as_secs_f64(),
+        "验证处理完成，总耗时"
+    );
+
+    // 8. 收集最终的验证结果统计
     info!("收集最终验证结果统计...");
 
     let mut final_redis_stats = HashMap::new();
@@ -239,7 +254,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         );
     }
 
-    // 7. 分析调度公平性
+    // 9. 分析调度公平性
     info!("分析调度公平性...");
 
     // Redis维度分析
@@ -299,7 +314,39 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
         warn!("数据库维度没有新的验证记录");
     }
 
-    // 8. 清理测试数据
+    // 10. 统计 worker 处理速度
+    info!("统计 worker 处理速度...");
+
+    let total_elapsed_secs = total_elapsed.as_secs_f64();
+    let total_verified = total_db_new.max(total_redis_new as usize);
+
+    if total_verified > 0 && total_elapsed_secs > 0.0 {
+        // 总的处理速度（所有worker合计）
+        let total_throughput = total_verified as f64 / total_elapsed_secs;
+
+        // 单个worker的平均处理速度
+        let per_worker_throughput = if worker_concurrency > 0 {
+            total_throughput / worker_concurrency as f64
+        } else {
+            0.0
+        };
+
+        info!(
+            total_verified,
+            total_elapsed_secs = format!("{:.2}", total_elapsed_secs),
+            worker_concurrency,
+            total_throughput = format!("{:.2} papers/sec", total_throughput),
+            per_worker_throughput = format!("{:.2} papers/sec", per_worker_throughput),
+            total_throughput_per_min = format!("{:.2} papers/min", total_throughput * 60.0),
+            per_worker_throughput_per_min =
+                format!("{:.2} papers/min", per_worker_throughput * 60.0),
+            "Worker 处理速度统计"
+        );
+    } else {
+        warn!("无法统计处理速度：没有验证活动或时间为0");
+    }
+
+    // 11. 清理测试数据
     info!("清理测试数据...");
     for &user_id in &test_user_ids {
         cleanup_user_test_data(&db, user_id).await?;
@@ -308,7 +355,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
     info!(
         total_users = user_count,
-        total_redis_new, total_db_new, "多用户并发验证公平性测试完成"
+        total_redis_new, total_db_new, total_verified, "多用户并发验证公平性测试完成"
     );
 
     // 基本断言：至少有一个维度应该有验证活动
