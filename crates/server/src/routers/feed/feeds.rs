@@ -8,6 +8,8 @@ use chrono::{DateTime, FixedOffset, Local, TimeZone};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
+use feed::redis::verify_manager::VerifyManager;
+use feed::workers::update_user_interest_metadata::run_update_user_interest_metadata;
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use futures::stream::{self, Stream};
 use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
@@ -27,12 +29,13 @@ use seaorm_db::{
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
+use tokio::signal;
 use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
@@ -380,11 +383,7 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
     }
 
     fn handle(&self, message: String) {
-        tracing::info!(
-            "Received Redis message for user {}: {}",
-            self.user_id,
-            message
-        );
+        tracing::info!("Received Redis message for user {}", self.user_id);
 
         // 将 Redis 消息转发到 SSE 流
         if self.sender.send(message).is_err() {
@@ -468,10 +467,33 @@ impl Drop for ConnectionMonitor {
 pub async fn stream_verify(
     State(state): State<AppState>,
     User(user): User,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>> {
     tracing::info!("SSE connection established for user: {}", user.id);
     let user_id = user.id;
     let channel = state.config.rss.verify_papers_channel.clone();
+
+    let result = run_update_user_interest_metadata(
+        Some(user_id.to_string()),
+        state.config.clone(),
+        state.conn.clone(),
+        state.redis.pool.clone(),
+    )
+    .await;
+    if result.is_err() {
+        tracing::error!(
+            "Failed to update user interest metadata: {}",
+            result.err().unwrap()
+        );
+        // 返回错误流
+        return Sse::new(Box::pin(stream::once(async {
+            Err(ApiError::CustomError {
+                message: "Failed to update user interest metadata".to_string(),
+                code: ApiCode::COMMON_FEED_ERROR,
+            })
+        })));
+    } else {
+        tracing::info!("Successfully updated user interest metadata");
+    }
 
     // 创建连接监控器，当 SSE 流结束时会自动触发 Drop
     let monitor =
@@ -489,47 +511,62 @@ pub async fn stream_verify(
         pubsub_manager.add_listener(handler).await;
     });
 
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
     let stream = stream::unfold(
-        (0, monitor, rx),
-        move |(mut counter, monitor, mut receiver)| async move {
+        (monitor, rx, verify_manager.clone()),
+        move |(monitor, mut receiver, verify_manager_clone)| async move {
             // 检查连接是否仍然活跃
             if !monitor.is_connected() {
                 tracing::info!("Connection lost for user: {}", user_id);
                 return None;
             }
 
-            // 使用 tokio::select! 同时监听定时器和 Redis 消息
+            // 使用 tokio::select! 同时监听定时器、Redis 消息和关闭信号
             tokio::select! {
+                // 监听关闭信号
+                _ = signal::ctrl_c() => {
+                    tracing::info!("SSE stream received shutdown signal for user: {}", user_id);
+                    None
+                }
                 // 定时发送心跳消息
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                    counter += 1;
 
                     let event_data = serde_json::json!({
                         "type": "heartbeat",
-                        "message": format!("Heartbeat #{}", counter),
                         "user_id": user_id,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
-                        "counter": counter,
-                        "status": "connected"
+                        "status": "connected",
                     });
 
                     Some((
                         Ok(Event::default()
                             .event("heartbeat")
                             .data(format!("data: {event_data}"))),
-                        (counter, monitor, receiver),
+                        (monitor, receiver, verify_manager_clone),
                     ))
                 }
                 // 接收 Redis PubSub 消息
                 result = receiver.recv() => {
                     match result {
                         Ok(message) => {
-                            tracing::info!("Forwarding Redis message to SSE for user {}: {}", user_id, message);
+                            tracing::info!("Forwarding Redis message to SSE for user {}", user_id);
+
+                            // 尝试解析Redis消息为JSON，如果失败则作为字符串处理
+                            let parsed_message = serde_json::from_str::<serde_json::Value>(&message)
+                                .unwrap_or_else(|_| serde_json::Value::String(message.clone()));
+                            let verify_info = verify_manager_clone.get_user_unverified_info(user_id).await.unwrap();
 
                             let event_data = serde_json::json!({
                                 "type": "verify_paper_success",
-                                "message": message,
-                                "user_id": user_id,
+                                "message": parsed_message,
+                                "verify_info": verify_info,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                 "status": "connected"
                             });
@@ -538,24 +575,13 @@ pub async fn stream_verify(
                                 Ok(Event::default()
                                     .event("verify_paper_success")
                                     .data(format!("data: {event_data}"))),
-                                (counter, monitor, receiver),
+                                ( monitor, receiver, verify_manager_clone),
                             ))
                         }
                         Err(_) => {
                             tracing::warn!("Redis message receiver closed for user {}", user_id);
-                            // 继续运行，只是不再接收 Redis 消息
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            Some((
-                                Ok(Event::default()
-                                    .event("error")
-                                    .data(format!("data: {}", serde_json::json!({
-                                        "type": "error",
-                                        "message": "Redis message channel closed",
-                                        "user_id": user_id,
-                                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                                    })))),
-                                (counter, monitor, receiver),
-                            ))
+                            // 结束 SSE 流（触发 Drop 清理与取消订阅），避免无限循环与阻塞优雅关闭
+                            None
                         }
                     }
                 }
@@ -563,5 +589,13 @@ pub async fn stream_verify(
         },
     );
 
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+    if let Err(e) = verify_manager
+        .append_user_to_verify_list(user_id, Some(state.config.rss.max_rss_paper as i32))
+        .await
+    {
+        tracing::error!("Failed to append user to verify list: {}", e);
+    }
+
+    Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
 }

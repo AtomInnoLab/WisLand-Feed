@@ -126,4 +126,3 @@ name = "verify_user_scheduler"
 concurrency = 1
 timeout_secs = 36000
 retry = 1
-cron = "@daily"

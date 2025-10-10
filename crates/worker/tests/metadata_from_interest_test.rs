@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use feed::workers::base::RedisService;
 use seaorm_db::connection::get_db;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -16,7 +15,7 @@ async fn test_metadata_from_interest_returns_json_or_empty()
         .compact()
         .try_init();
 
-    let _db = get_db().await.clone();
+    let db = get_db().await.clone();
 
     let redis_url = std::env::var("REDIS_URL")
         .or_else(|_| std::env::var("APP_AGENT_REDIS__URL"))
@@ -46,16 +45,9 @@ async fn test_metadata_from_interest_returns_json_or_empty()
 
     info!(%interest, "starting criteria_from_interest test");
 
-    let result = feed::workers::update_user_interest_metadata::verify_from_interest(
-        RedisService {
-            pool,
-            apalis_conn: apalis_redis::connect(redis_url.as_str())
-                .await
-                .expect("Could not connect redis"),
-        },
-        interest,
-    )
-    .await;
+    let result =
+        feed::workers::update_user_interest_metadata::verify_from_interest(pool, db, interest)
+            .await;
     assert!(result.is_ok(), "criteria_from_interest should not error");
     let verify = result.unwrap();
     info!(?verify, "verify returned");
