@@ -1,12 +1,17 @@
 use super::FEED_TAG;
 use crate::model::page::{Page, Pagination};
-use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state::AppState};
+use crate::{
+    middlewares::auth::{User, UserInfo},
+    model::base::ApiResponse,
+    state::app_state::AppState,
+};
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use chrono::{DateTime, FixedOffset, Local, TimeZone};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
+use feed::redis::pubsub::RedisPubSubManager;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
 use feed::redis::verify_manager::VerifyManager;
 use feed::workers::update_user_interest_metadata::run_update_user_interest_metadata;
@@ -367,13 +372,13 @@ pub async fn batch_delete(
 
 // SSE message handler for forwarding Redis PubSub messages to SSE stream
 struct SseMessageHandler {
-    user_id: String,
+    user_id: i64,
     channel: String,
     sender: broadcast::Sender<String>,
 }
 
 impl SseMessageHandler {
-    fn new(user_id: String, channel: String, sender: broadcast::Sender<String>) -> Self {
+    fn new(user_id: i64, channel: String, sender: broadcast::Sender<String>) -> Self {
         Self {
             user_id,
             channel,
@@ -384,7 +389,7 @@ impl SseMessageHandler {
 
 impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
     fn event_name(&self) -> String {
-        self.channel.clone()
+        RedisPubSubManager::build_user_channel(&self.channel, self.user_id)
     }
 
     fn handle(&self, message: String) {
@@ -514,7 +519,7 @@ pub async fn stream_verify(
 
     // Create message handler to forward Redis messages to SSE stream
     let handler = Box::new(SseMessageHandler::new(
-        user_id.to_string(),
+        user_id,
         verify_papers_sub_channel,
         tx,
     ));
@@ -534,12 +539,45 @@ pub async fn stream_verify(
     .await;
 
     let stream = stream::unfold(
-        (monitor, rx, verify_manager.clone()),
-        move |(monitor, mut receiver, verify_manager_clone)| async move {
-            // Check if connection is still active
-            if !monitor.is_connected() {
-                tracing::info!("Connection lost for user: {}", user_id);
+        (monitor, rx, verify_manager.clone(), false), // Add completion flag
+        move |(monitor, mut receiver, verify_manager_clone, mut is_completed)| async move {
+            // Check if connection is still active or already completed
+            if !monitor.is_connected() || is_completed {
+                tracing::info!("Ending SSE stream for user: {}", user_id);
                 return None;
+            }
+
+            // Check verification status before waiting
+            let verify_info = verify_manager_clone
+                .get_user_unverified_info(user_id)
+                .await
+                .unwrap();
+            let verification_completed = verify_info.total == 0
+                || (verify_info.success_count + verify_info.fail_count) == verify_info.total;
+
+            if verification_completed {
+                // If completed, send completion event and mark as completed
+                tracing::info!(
+                    "Verification completed for user {}, sending completion event",
+                    user_id
+                );
+
+                let completion_event_data = serde_json::json!({
+                    "type": "verify_completed",
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "status": "completed",
+                    "is_completed": true,
+                });
+
+                let completion_event: Result<Event, ApiError> = Ok(Event::default()
+                    .event("verify_completed")
+                    .data(format!("data: {completion_event_data}")));
+
+                is_completed = true;
+                return Some((
+                    completion_event,
+                    (monitor, receiver, verify_manager_clone, is_completed),
+                ));
             }
 
             // Use tokio::select! to simultaneously listen to timer, Redis messages and shutdown signal
@@ -551,20 +589,21 @@ pub async fn stream_verify(
                 }
                 // Send heartbeat message periodically
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
-
+                    // Send normal heartbeat (completion already checked before select)
                     let event_data = serde_json::json!({
                         "type": "heartbeat",
                         "user_id": user_id,
+                        "verify_info": verify_info,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                         "status": "connected",
+                        "is_completed": false,
                     });
 
-                    Some((
-                        Ok(Event::default()
-                            .event("heartbeat")
-                            .data(format!("data: {event_data}"))),
-                        (monitor, receiver, verify_manager_clone),
-                    ))
+                    let event: Result<Event, ApiError> = Ok(Event::default()
+                        .event("heartbeat")
+                        .data(format!("data: {event_data}")));
+
+                    Some((event, (monitor, receiver, verify_manager_clone, is_completed)))
                 }
                 // Receive Redis PubSub messages
                 result = receiver.recv() => {
@@ -572,25 +611,29 @@ pub async fn stream_verify(
                         Ok(message) => {
                             tracing::info!("Forwarding Redis message to SSE for user {}", user_id);
 
+                            let verify_info = verify_manager_clone
+                                .get_user_unverified_info(user_id)
+                                .await
+                                .unwrap();
                             // Try to parse Redis message as JSON, if failed treat as string
                             let parsed_message = serde_json::from_str::<serde_json::Value>(&message)
                                 .unwrap_or_else(|_| serde_json::Value::String(message.clone()));
-                            let verify_info = verify_manager_clone.get_user_unverified_info(user_id).await.unwrap();
 
+                            // Always send verify_paper_success message
                             let event_data = serde_json::json!({
                                 "type": "verify_paper_success",
                                 "message": parsed_message,
                                 "verify_info": verify_info,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
-                                "status": "connected"
+                                "status": "connected",
+                                "is_completed": false,
                             });
 
-                            Some((
-                                Ok(Event::default()
-                                    .event("verify_paper_success")
-                                    .data(format!("data: {event_data}"))),
-                                ( monitor, receiver, verify_manager_clone),
-                            ))
+                            let event: Result<Event, ApiError> = Ok(Event::default()
+                                .event("verify_paper_success")
+                                .data(format!("data: {event_data}")));
+
+                            Some((event, (monitor, receiver, verify_manager_clone, is_completed)))
                         }
                         Err(_) => {
                             tracing::warn!("Redis message receiver closed for user {}", user_id);
@@ -616,4 +659,79 @@ pub async fn stream_verify(
 
     Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserVerifyInfoItem {
+    pub user_id: i64,
+    pub pending_unverify_count: i64,
+    pub success_count: i64,
+    pub fail_count: i64,
+    pub processing_count: i64,
+    pub total: i64,
+    pub token_usage: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_info: Option<UserInfo>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/all-users-verify-info",
+    responses(
+        (status = 200, body = Vec<UserVerifyInfoItem>),
+    ),
+    tag = FEED_TAG,
+)]
+pub async fn all_users_verify_info(
+    State(state): State<AppState>,
+    User(user): User,
+) -> Result<ApiResponse<Vec<UserVerifyInfoItem>>, ApiError> {
+    tracing::info!(
+        "Getting verify info for all users, current user: {}",
+        user.id
+    );
+
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    // Get all user IDs from verify list
+    let user_ids = verify_manager.get_user_verify_list().await?;
+
+    tracing::info!("Found {} users in verify list", user_ids.len());
+
+    // Get verify info for each user
+    let mut results = Vec::new();
+    for user_id in user_ids {
+        match verify_manager.get_user_unverified_info(user_id).await {
+            Ok(info) => {
+                // If this is the current user, include user info
+                let user_info = if user_id == user.id {
+                    Some(user.clone())
+                } else {
+                    None
+                };
+
+                results.push(UserVerifyInfoItem {
+                    user_id,
+                    pending_unverify_count: info.pending_unverify_count,
+                    success_count: info.success_count,
+                    fail_count: info.fail_count,
+                    processing_count: info.processing_count,
+                    total: info.total,
+                    token_usage: info.token_usage,
+                    user_info,
+                });
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get verify info for user {}: {}", user_id, e);
+            }
+        }
+    }
+
+    Ok(ApiResponse::data(results))
 }

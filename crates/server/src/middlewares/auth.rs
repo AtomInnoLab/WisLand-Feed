@@ -1,12 +1,13 @@
 use axum::extract::FromRequestParts;
 use common::{error::api_error::*, prelude::ApiCode};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use tracing::info;
+use utoipa::ToSchema;
 
 use crate::consts::{WIS_TOKEN, WIS_TOKEN_LOWERCASE};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserInfo {
     pub id: i64,
     pub open_id: String,

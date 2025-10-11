@@ -4,6 +4,7 @@ use crate::state::app_state::AppState;
 
 pub mod feeds;
 pub mod interests;
+pub mod paper;
 pub mod rss;
 pub mod subscriptions;
 
@@ -29,4 +30,6 @@ pub fn feed_routers() -> OpenApiRouter<AppState> {
         .routes(routes!(feeds::unread_count))
         .routes(routes!(feeds::batch_delete))
         .routes(routes!(feeds::stream_verify))
+        .routes(routes!(feeds::all_users_verify_info))
+        .routes(routes!(paper::unverified_papers))
 }
