@@ -121,6 +121,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
                     fail_count: 0,
                     processing_count: 0,
                     total: 0,
+                    token_usage: 0,
                 }
             }
         };
