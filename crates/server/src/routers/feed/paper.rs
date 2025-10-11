@@ -6,10 +6,7 @@ use crate::{
 };
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
-use seaorm_db::query::feed::{
-    rss_papers::{GetUnverifiedPaperIdsParams, RssPaperData, RssPapersQuery},
-    utils::UserUnverifiedPapers,
-};
+use seaorm_db::query::feed::rss_papers::{GetUnverifiedPaperIdsParams, RssPaperData, RssPapersQuery};
 use serde::Deserialize;
 use snafu::ResultExt;
 use utoipa::ToSchema;
