@@ -132,18 +132,23 @@ pub async fn rss(
     // Ok(ApiResponse::data(rss_sources))
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserRssResponse {
+    pub source_map: Vec<rss_sources::Model>,
+}
+
 #[utoipa::path(
     get,
     path = "/user_rss",
     responses(
-        (status = 200, body = Vec<rss_sources::Model>),
+        (status = 200, body = UserRssResponse),
     ),
     tag = FEED_TAG,
 )]
 pub async fn user_rss(
     State(state): State<AppState>,
     User(user): User,
-) -> Result<ApiResponse<Vec<rss_sources::Model>>, ApiError> {
+) -> Result<ApiResponse<UserRssResponse>, ApiError> {
     tracing::info!(user_id = user.id, "list user subscribed rss sources");
 
     let subscriptions = RssSubscriptionsQuery::list_by_user_id(&state.conn, user.id, None)
@@ -157,7 +162,7 @@ pub async fn user_rss(
     source_ids.sort_unstable();
     source_ids.dedup();
 
-    let rss_sources: Vec<rss_sources::Model> = if source_ids.is_empty() {
+    let source_map: Vec<rss_sources::Model> = if source_ids.is_empty() {
         Vec::new()
     } else {
         RssSourcesQuery::get_by_ids(&state.conn, source_ids)
@@ -168,7 +173,7 @@ pub async fn user_rss(
             })?
     };
 
-    Ok(ApiResponse::data(rss_sources))
+    Ok(ApiResponse::data(UserRssResponse { source_map }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
