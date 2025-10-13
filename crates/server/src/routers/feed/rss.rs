@@ -5,7 +5,10 @@ use axum::extract::{Path, State};
 use common::{error::api_error::*, prelude::ApiCode};
 use seaorm_db::{
     entities::feed::rss_sources,
-    query::feed::rss_sources::{RssSourceData, RssSourcesQuery},
+    query::feed::{
+        rss_sources::{RssSourceData, RssSourcesQuery},
+        rss_subscriptions::RssSubscriptionsQuery,
+    },
 };
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -127,6 +130,45 @@ pub async fn rss(
     let tree_vec = convert_btreemap_to_vec(tree);
     Ok(ApiResponse::data(tree_vec))
     // Ok(ApiResponse::data(rss_sources))
+}
+
+#[utoipa::path(
+    get,
+    path = "/user_rss",
+    responses(
+        (status = 200, body = Vec<rss_sources::Model>),
+    ),
+    tag = FEED_TAG,
+)]
+pub async fn user_rss(
+    State(state): State<AppState>,
+    User(user): User,
+) -> Result<ApiResponse<Vec<rss_sources::Model>>, ApiError> {
+    tracing::info!(user_id = user.id, "list user subscribed rss sources");
+
+    let subscriptions = RssSubscriptionsQuery::list_by_user_id(&state.conn, user.id, None)
+        .await
+        .context(DbErrSnafu {
+            stage: "get-rss-subscriptions",
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        })?;
+
+    let mut source_ids: Vec<i32> = subscriptions.into_iter().map(|s| s.source_id).collect();
+    source_ids.sort_unstable();
+    source_ids.dedup();
+
+    let rss_sources: Vec<rss_sources::Model> = if source_ids.is_empty() {
+        Vec::new()
+    } else {
+        RssSourcesQuery::get_by_ids(&state.conn, source_ids)
+            .await
+            .context(DbErrSnafu {
+                stage: "get-rss-sources",
+                code: ApiCode::COMMON_DATABASE_ERROR,
+            })?
+    };
+
+    Ok(ApiResponse::data(rss_sources))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
