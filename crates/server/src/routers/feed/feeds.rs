@@ -19,7 +19,8 @@ use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use futures::stream::{self, Stream};
 use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
 use seaorm_db::query::feed::user_paper_verifications::{
-    ListVerifiedParams, MarkReadParams, UserPaperVerificationsQuery, VerifiedPaperItem,
+    ListVerifiedParams, MarkReadParams, PaperVerificationWithDetails, UserPaperVerificationsQuery,
+    VerifiedPaperItem,
 };
 use seaorm_db::query::feed::utils::{
     UserUnverifiedPapers, count_user_unread_papers, get_user_unverified_papers_count_info,
@@ -394,6 +395,53 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
 
     fn handle(&self, message: String) {
         tracing::info!("Received Redis message for user {}", self.user_id);
+
+        // Parse message to check if there's at least one "yes" match
+        let paper_verification: PaperVerificationWithDetails = match serde_json::from_str(&message)
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse Redis message as PaperVerificationWithDetails: {}",
+                    e
+                );
+                tracing::debug!("Raw message that failed to parse: {}", message);
+                // If parsing fails, forward anyway to maintain backward compatibility
+                if self.sender.send(message).is_err() {
+                    tracing::warn!(
+                        "Failed to send message to SSE stream for user {}",
+                        self.user_id
+                    );
+                }
+                return;
+            }
+        };
+
+        // Check if there is at least one "yes" match in verifications
+        let has_yes_match = paper_verification
+            .verifications
+            .iter()
+            .any(|v| v.match_ == VerificationMatch::Yes);
+
+        tracing::debug!(
+            "Paper has {} verifications, has_yes_match: {}",
+            paper_verification.verifications.len(),
+            has_yes_match
+        );
+
+        // Only forward message if there is at least one "yes" match
+        if !has_yes_match {
+            tracing::info!(
+                "No 'yes' match found in verifications, skipping message for user {}",
+                self.user_id
+            );
+            return;
+        }
+
+        tracing::info!(
+            "Forwarding message with 'yes' match to SSE stream for user {}",
+            self.user_id
+        );
 
         // Forward Redis message to SSE stream
         if self.sender.send(message).is_err() {
