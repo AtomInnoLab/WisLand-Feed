@@ -45,9 +45,49 @@ pub struct UnverifiedPapersResponse {
 #[utoipa::path(
     get,
     path = "/unverified-papers",
+    summary = "Get unverified papers",
+    description = r#"
+Retrieve a paginated list of papers that have not yet been verified against user interests.
+
+## Overview
+This endpoint returns papers from the user's RSS subscriptions that are waiting to be verified. These papers have not yet been matched against the user's defined interests.
+
+## Query Parameters
+- `page` (default: 1): Page number for pagination
+- `page_size` (default: 10): Number of items per page
+- `channel` (optional): Filter papers by specific channel
+- `keyword` (optional): Search keyword to filter papers by title or content
+
+## Returns
+Returns an `UnverifiedPapersResponse` object containing:
+- `pagination`: Pagination metadata
+  - `page`: Current page number
+  - `page_size`: Items per page
+  - `total`: Total number of unverified papers
+  - `total_pages`: Total number of pages
+- `papers`: Array of `RssPaperDataWithDetail` objects
+  - Paper details: id, title, link, description, author, pub_date
+  - Source information: source_id, source details
+  - Additional metadata
+
+## Use Cases
+- Display papers awaiting verification
+- Show new content from RSS feeds
+- Pre-verification paper review
+- Batch verification preparation
+
+## Workflow
+1. User subscribes to RSS sources
+2. System fetches papers from RSS feeds
+3. Papers appear in this unverified list
+4. User triggers verification via `/verify` endpoint
+5. Verified papers move to the verified papers list
+"#,
     request_body = PapersRequest,
     responses(
-        (status = 200, body = UnverifiedPapersResponse),
+        (status = 200, body = UnverifiedPapersResponse, description = "Successfully retrieved unverified papers with pagination"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Database error"),
     ),
     tag = FEED_TAG,
 )]

@@ -101,8 +101,23 @@ pub struct StreamVerifyRequest {
 #[utoipa::path(
     get,
     path = "/unverified-count-info",
+    summary = "Get unverified papers count information",
+    description = r#"
+Retrieve the count information of unverified papers for the authenticated user.
+
+## Overview
+This endpoint returns statistics about papers that have not yet been verified against the user's interests.
+
+## Returns
+Returns a `UserUnverifiedPapers` object containing:
+- Total count of unverified papers
+- Breakdown by source or category
+- Additional metadata about unverified papers
+"#,
     responses(
-        (status = 200, body = UserUnverifiedPapers),
+        (status = 200, body = UserUnverifiedPapers, description = "Successfully retrieved unverified papers count information"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Internal server error"),
     ),
     tag = FEED_TAG,
 )]
@@ -125,12 +140,27 @@ pub async fn unverified_count_info(
 #[utoipa::path(
     get,
     path = "/unread-count",
+    summary = "Get unread papers count",
+    description = r#"
+Retrieve the total count of unread papers for the authenticated user.
+
+## Overview
+This endpoint returns the number of verified papers that the user has not yet marked as read.
+
+## Parameters
+- `channel` (optional): Filter by specific channel to get unread count for that channel only
+
+## Returns
+Returns a `u64` representing the total count of unread papers.
+"#,
     request_body = FeedRequest,
     params(
-        ("channel" = String, Path, description = "Channel"),
+        ("channel" = Option<String>, Query, description = "Optional channel filter to get unread count for specific channel"),
     ),
     responses(
-        (status = 200, body = u64),
+        (status = 200, body = u64, description = "Successfully retrieved unread papers count"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Internal server error"),
     ),
     tag = FEED_TAG,
 )]
@@ -153,12 +183,37 @@ pub async fn unread_count(
 #[utoipa::path(
     post,
     path = "/verify",
+    summary = "Trigger paper verification",
+    description = r#"
+Initiate the verification process for user's papers against their interests.
+
+## Overview
+This endpoint triggers an asynchronous verification job that matches unverified papers from the user's RSS subscriptions against their defined interests. The verification process uses AI to determine relevance.
+
+## Process
+1. Creates a verification job and adds it to the queue
+2. Returns immediately with a success indicator
+3. Verification runs asynchronously in the background
+4. Progress can be tracked via the `/verify-status` endpoint
+
+## Parameters
+- `channel`: The channel to filter papers for verification
+
+## Request Body
+```json
+{
+  "channel": "default"
+}
+```
+
+## Returns
+Returns `true` if the verification job was successfully queued.
+"#,
     request_body = VerifyRequest,
-    params(
-        ("channel" = String, Path, description = "Channel"),
-    ),
     responses(
-        (status = 200, body = bool),
+        (status = 200, body = bool, description = "Verification job successfully queued, returns true"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Failed to queue verification job"),
     ),
     tag = FEED_TAG,
 )]
@@ -189,11 +244,34 @@ pub async fn verify(
 #[utoipa::path(
     get,
     path = "/verify-status",
+    summary = "Get verification job status",
+    description = r#"
+Retrieve the current status and details of the user's paper verification job.
+
+## Overview
+This endpoint returns detailed information about an ongoing or completed verification job, including progress, counts, and any errors.
+
+## Parameters
+- `channel` (optional): Filter status by specific channel
+
+## Returns
+Returns a `JobDetail` object containing:
+- Job ID and status (pending, running, completed, failed)
+- Progress information (processed count, total count, percentage)
+- Success and failure counts
+- Token usage statistics
+- Error messages if any
+- Timestamps for job creation and updates
+
+Returns `null` if no verification job exists for the user.
+"#,
     params(
-        ("channel" = String, Path, description = "Channel"),
+        ("channel" = Option<String>, Query, description = "Optional channel filter to get verification status for specific channel"),
     ),
     responses(
-        (status = 200, body = JobDetail),
+        (status = 200, body = Option<JobDetail>, description = "Successfully retrieved verification job details, returns null if no job exists"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Failed to retrieve verification status"),
     ),
     tag = FEED_TAG,
 )]
@@ -224,9 +302,37 @@ pub async fn verify_detail(
 #[utoipa::path(
     post,
     path = "/all-verified-papers",
+    summary = "Get all verified papers",
+    description = r#"
+Retrieve a paginated list of all verified papers for the authenticated user.
+
+## Overview
+This endpoint returns papers that have been verified against the user's interests, with various filtering and pagination options.
+
+## Request Parameters
+- `page`: Page number (starts from 1)
+- `page_size`: Number of items per page
+- `channel` (optional): Filter by specific channel
+- `matches` (optional): Filter by verification match types (Yes, No, Maybe)
+- `user_interest_ids` (optional): Filter by specific interest IDs
+- `time_range` (optional): Filter papers within a time range
+  - `start`: Start datetime (defaults to today's midnight if not specified)
+  - `end`: End datetime
+- `ignore_time_range` (optional): Ignore time range filter
+- `keyword` (optional): Search keyword to filter papers by title or content
+
+## Returns
+Returns an `AllVerifiedPapersResponse` object containing:
+- `pagination`: Pagination information (page, page_size, total, total_pages)
+- `papers`: Array of verified paper items with verification details
+- `interest_map`: Mapping of interest IDs to interest names
+- `source_map`: Mapping of source IDs to RSS source details
+"#,
     request_body = AllVerifiedPapersRequest,
     responses(
-        (status = 200, body = AllVerifiedPapersResponse),
+        (status = 200, body = AllVerifiedPapersResponse, description = "Successfully retrieved verified papers with pagination and metadata"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Database error or failed to retrieve papers"),
     ),
     tag = FEED_TAG,
 )]
@@ -321,9 +427,27 @@ pub async fn all_verified_papers(
 #[utoipa::path(
     post,
     path = "/mark-as-read",
+    summary = "Mark papers as read",
+    description = r#"
+Mark one or more verified papers as read for the authenticated user.
+
+## Overview
+This endpoint allows users to mark papers as read, which updates their read status in the database.
+
+## Request Body
+The `MarkReadParams` should contain:
+- `paper_ids`: Array of paper IDs to mark as read
+- `channel` (optional): Channel filter
+- `read_all` (optional): Boolean flag to mark all papers as read
+
+## Returns
+Returns a `u64` representing the number of papers successfully marked as read.
+"#,
     request_body = MarkReadParams,
     responses(
-        (status = 200, body = u64),
+        (status = 200, body = u64, description = "Successfully marked papers as read, returns count of affected papers"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Database error or failed to mark papers as read"),
     ),
     tag = FEED_TAG,
 )]
@@ -347,9 +471,34 @@ pub async fn papers_make_read(
 #[utoipa::path(
     post,
     path = "/batch-delete",
+    summary = "Batch delete verified papers",
+    description = r#"
+Delete multiple verified papers by their IDs for the authenticated user.
+
+## Overview
+This endpoint allows users to permanently delete verified papers from their feed.
+
+## Request Body
+```json
+{
+  "ids": [1, 2, 3, 4, 5]
+}
+```
+
+## Parameters
+- `ids`: Array of paper IDs to delete
+
+## Returns
+Returns a `u64` representing the number of papers successfully deleted.
+
+## Note
+This operation is permanent and cannot be undone. Deleted papers will not appear in the user's feed again.
+"#,
     request_body = DeletePapersRequest,
     responses(
-        (status = 200, body = u64),
+        (status = 200, body = u64, description = "Successfully deleted papers, returns count of deleted papers"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Database error or failed to delete papers"),
     ),
     tag = FEED_TAG,
 )]
@@ -517,9 +666,69 @@ impl Drop for ConnectionMonitor {
 #[utoipa::path(
     post,
     path = "/stream-verify",
+    summary = "Stream verification progress via SSE",
+    description = r#"
+Establish a Server-Sent Events (SSE) connection to receive real-time updates during paper verification.
+
+## Overview
+This endpoint creates a persistent SSE connection that streams verification progress updates to the client in real-time. It's useful for showing live progress in the UI.
+
+## Request Body
+```json
+{
+  "channel": "default"
+}
+```
+
+## Parameters
+- `channel` (optional): Channel to filter verification updates
+
+## SSE Event Types
+The stream emits the following event types:
+
+1. **heartbeat**: Periodic status updates every 5 seconds
+   - Contains: user_id, verify_info, timestamp, status, is_completed
+   
+2. **verify_paper_success**: Sent when a paper is successfully verified
+   - Contains: message (paper details), verify_info, timestamp, status
+   
+3. **verify_completed**: Sent when all papers have been verified
+   - Contains: timestamp, status, is_completed flag
+
+## Event Data Structure
+```json
+{
+  "type": "heartbeat",
+  "user_id": 123,
+  "verify_info": {
+    "pending_unverify_count": 10,
+    "success_count": 5,
+    "fail_count": 1,
+    "processing_count": 2,
+    "total": 18,
+    "token_usage": 1500
+  },
+  "timestamp": "2024-01-01T12:00:00Z",
+  "status": "connected",
+  "is_completed": false
+}
+```
+
+## Connection Management
+- Connection automatically updates user interest metadata before starting
+- Subscribes to Redis pub/sub for real-time updates
+- Automatically unsubscribes and cleans up when connection is closed
+- Sends keep-alive messages every 10 seconds
+- Only forwards papers with at least one "Yes" match
+
+## Note
+This is a long-lived connection. The client should be prepared to handle connection drops and reconnect if needed.
+"#,
     request_body = StreamVerifyRequest,
     responses(
-        (status = 200, description = "SSE connection test"),
+        (status = 200, description = "SSE connection established successfully, will stream verification updates"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Failed to establish SSE connection or update metadata"),
     ),
     tag = FEED_TAG,
 )]
@@ -725,8 +934,36 @@ pub struct UserVerifyInfoItem {
 #[utoipa::path(
     get,
     path = "/all-users-verify-info",
+    summary = "Get verification info for all users",
+    description = r#"
+Retrieve verification status information for all users currently in the verification queue.
+
+## Overview
+This endpoint returns a list of all users who have ongoing or pending verification jobs, along with their progress and statistics.
+
+## Returns
+Returns an array of `UserVerifyInfoItem` objects, each containing:
+- `user_id`: The user's unique identifier
+- `pending_unverify_count`: Number of papers waiting to be verified
+- `success_count`: Number of papers successfully verified
+- `fail_count`: Number of papers that failed verification
+- `processing_count`: Number of papers currently being processed
+- `total`: Total number of papers in the verification job
+- `token_usage`: Total tokens consumed for this user's verification
+- `user_info` (optional): Detailed user information (only included for the authenticated user)
+
+## Use Cases
+- Admin dashboard to monitor all verification jobs
+- System health monitoring
+- Resource usage tracking
+
+## Note
+Only the authenticated user's entry will include the `user_info` field for privacy reasons.
+"#,
     responses(
-        (status = 200, body = Vec<UserVerifyInfoItem>),
+        (status = 200, body = Vec<UserVerifyInfoItem>, description = "Successfully retrieved verification info for all users in the queue"),
+        (status = 401, description = "Unauthorized - valid authentication required"),
+        (status = 500, description = "Failed to retrieve verification information"),
     ),
     tag = FEED_TAG,
 )]
