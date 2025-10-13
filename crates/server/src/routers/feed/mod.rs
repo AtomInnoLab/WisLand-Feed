@@ -13,6 +13,7 @@ pub(crate) const FEED_TAG: &str = "feed";
 pub fn feed_routers() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(rss::rss))
+        .routes(routes!(rss::user_rss))
         .routes(routes!(rss::rss_detail))
         .routes(routes!(rss::rss_create))
         .routes(routes!(rss::rss_delete))
