@@ -122,6 +122,9 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
                     processing_count: 0,
                     total: 0,
                     token_usage: 0,
+                    matched_count: 0,
+                    max_match_limit: 0,
+                    total_matched_count: 0,
                 }
             }
         };
@@ -154,7 +157,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
             // Simulate user calling verify interface: add to verification queue
             let result = verify_manager_clone
-                .append_user_to_verify_list(user_id, Some(100), None)
+                .append_user_to_verify_list(user_id, Some(1000), None, 10)
                 .await;
 
             match result {
@@ -186,7 +189,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
     // 6. Record start time and wait for verification system to work
     let start_time = Instant::now();
-    let wait_duration = Duration::from_secs(90); // Extend wait time to 90 seconds
+    let wait_duration = Duration::from_secs(900); // Extend wait time to 90 seconds
     let check_interval = Duration::from_secs(5);
     let mut elapsed = Duration::ZERO;
 
@@ -401,7 +404,7 @@ async fn setup_user_test_data(
     interests.shuffle(&mut rng);
     let selected_interests: Vec<String> = interests
         .into_iter()
-        .take(2) // Each user selects 2 interests
+        .take(4) // Each user selects 2 interests
         .collect();
 
     UserInterestsQuery::replace_many(
@@ -415,7 +418,7 @@ async fn setup_user_test_data(
     // Randomly select subscriptions from existing sources
     let mut sources = source_ids.to_vec();
     sources.shuffle(&mut rng);
-    let max_sources = sources.len().clamp(1, 3); // Maximum 3, minimum 1
+    let max_sources = sources.len().clamp(5, 10); // Maximum 3, minimum 1
     let selected_sources: Vec<i32> = sources.into_iter().take(max_sources).collect();
 
     RssSubscriptionsQuery::replace_many(db, user_id, selected_sources.clone()).await?;

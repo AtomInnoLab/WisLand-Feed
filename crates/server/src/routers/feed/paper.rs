@@ -34,6 +34,7 @@ pub struct PapersRequest {
     pub pagination: Page,
     pub channel: Option<String>,
     pub keyword: Option<String>,
+    pub rss_source_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -57,6 +58,7 @@ This endpoint returns papers from the user's RSS subscriptions that are waiting 
 - `page_size` (default: 10): Number of items per page
 - `channel` (optional): Filter papers by specific channel
 - `keyword` (optional): Search keyword to filter papers by title or content
+- `rss_source_id` (optional): Filter papers by specific RSS source ID
 
 ## Returns
 Returns an `UnverifiedPapersResponse` object containing:
@@ -103,6 +105,7 @@ pub async fn unverified_papers(
         limit: Some(payload.pagination.page_size()),
         channel: payload.channel.clone(),
         keyword: payload.keyword.clone(),
+        rss_source_id: payload.rss_source_id,
     };
 
     let rss_papers = RssPapersQuery::get_unverified_papers(&state.conn, user.id, params.clone())
