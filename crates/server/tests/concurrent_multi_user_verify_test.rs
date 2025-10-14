@@ -124,6 +124,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
                     token_usage: 0,
                     matched_count: 0,
                     max_match_limit: 0,
+                    total_matched_count: 0,
                 }
             }
         };
@@ -156,7 +157,7 @@ async fn test_concurrent_multi_user_verify_fairness() -> Result<(), Box<dyn std:
 
             // Simulate user calling verify interface: add to verification queue
             let result = verify_manager_clone
-                .append_user_to_verify_list(user_id, Some(1000), None, Some(10))
+                .append_user_to_verify_list(user_id, Some(1000), None, 10)
                 .await;
 
             match result {

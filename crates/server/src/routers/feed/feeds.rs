@@ -81,6 +81,10 @@ pub struct AllVerifiedPapersResponse {
     pub papers: Vec<VerifiedPaperItem>,
     pub interest_map: HashMap<i64, String>,
     pub source_map: HashMap<i32, rss_sources::Model>,
+    pub user_interest_stats: HashMap<i64, u64>,
+    pub today_count: u64,
+    pub yesterday_count: u64,
+    pub older_than_three_days_count: u64,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -98,6 +102,7 @@ pub struct DeletePapersRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StreamVerifyRequest {
     pub channel: Option<String>,
+    pub max_match_limit_per_user: Option<i32>,
 }
 
 #[utoipa::path(
@@ -330,6 +335,10 @@ Returns an `AllVerifiedPapersResponse` object containing:
 - `papers`: Array of verified paper items with verification details
 - `interest_map`: Mapping of interest IDs to interest names
 - `source_map`: Mapping of source IDs to RSS source details
+- `user_interest_stats`: Statistics of matched papers per user interest
+- `today_count`: Count of papers verified today
+- `yesterday_count`: Count of papers verified yesterday
+- `older_than_three_days_count`: Count of papers verified more than 3 days ago
 "#,
     request_body = AllVerifiedPapersRequest,
     responses(
@@ -372,6 +381,7 @@ pub async fn all_verified_papers(
             ignore_time_range: payload.ignore_time_range,
             keyword: payload.keyword.clone(),
             rss_source_id: payload.rss_source_id,
+            filter_by_unverified_lasted_paper_id: Some(!payload.ignore_time_range.unwrap_or(false)),
         },
     )
     .await
@@ -425,6 +435,10 @@ pub async fn all_verified_papers(
         papers: verified_papers.items,
         interest_map,
         source_map,
+        user_interest_stats: verified_papers.user_interest_stats,
+        today_count: verified_papers.today_count,
+        yesterday_count: verified_papers.yesterday_count,
+        older_than_three_days_count: verified_papers.older_than_three_days_count,
     }))
 }
 
@@ -680,12 +694,14 @@ This endpoint creates a persistent SSE connection that streams verification prog
 ## Request Body
 ```json
 {
-  "channel": "arxiv"
+  "channel": "arxiv",
+  "max_match_limit_per_user": 50
 }
 ```
 
 ## Parameters
 - `channel` (optional): Channel to filter verification updates
+- `max_match_limit_per_user` (optional): Maximum number of papers to match per user. When this limit is reached, a `match_limit_reached` event will be sent and the connection will be closed
 
 ## SSE Event Types
 The stream emits the following event types:
@@ -693,8 +709,8 @@ The stream emits the following event types:
 1. **heartbeat**: Periodic status updates every 5 seconds
    - Contains: user_id, verify_info, timestamp, status, is_completed
    
-2. **verify_paper_success**: Sent when a paper is successfully verified
-   - Contains: message (paper details), verify_info, timestamp, status
+2. **verify_paper_success**: Sent when a paper is successfully verified (only for papers with at least one "Yes" match)
+   - Contains: verification_details (paper info and verification results), user_verify_info (user statistics), timestamp, status
    
 3. **verify_completed**: Sent when all papers have been verified
    - Contains: timestamp, status, is_completed flag
@@ -719,7 +735,59 @@ The stream emits the following event types:
     "total": 18,
     "token_usage": 1500,
     "matched_count": 8,
-    "max_match_limit": 50
+    "max_match_limit": 50,
+    "total_matched_count": 8
+  },
+  "timestamp": "2024-01-01T12:00:00Z",
+  "status": "connected",
+  "is_completed": false
+}
+```
+
+### verify_paper_success event
+```json
+{
+  "type": "verify_paper_success",
+  "verification_details": {
+    "paper": {
+      "id": 456,
+      "title": "Example Paper Title",
+      "arxiv_id": "2401.12345",
+      "abstract": "Paper abstract...",
+      "published_at": "2024-01-01T00:00:00Z",
+      // ... other paper fields
+    },
+    "verifications": [
+      {
+        "id": 789,
+        "user_id": 123,
+        "paper_id": 456,
+        "user_interest": {
+          "id": 1,
+          "interest": "Machine Learning",
+          // ... other interest fields
+        },
+        "match": "Yes",
+        "relevance_score": 0.95,
+        "verified_at": "2024-01-01T12:00:00Z",
+        "channel": "arxiv",
+        "metadata": null,
+        "unread": true,
+        "created_at": "2024-01-01T12:00:00Z",
+        "updated_at": "2024-01-01T12:00:00Z"
+      }
+    ]
+  },
+  "user_verify_info": {
+    "pending_unverify_count": 9,
+    "success_count": 6,
+    "fail_count": 1,
+    "processing_count": 2,
+    "total": 18,
+    "token_usage": 1600,
+    "matched_count": 9,
+    "max_match_limit": 50,
+    "total_matched_count": 9
   },
   "timestamp": "2024-01-01T12:00:00Z",
   "status": "connected",
@@ -745,8 +813,8 @@ The stream emits the following event types:
 - Automatically unsubscribes and cleans up when connection is closed
 - Sends keep-alive messages every 10 seconds
 - Only forwards papers with at least one "Yes" match
-- Monitors matched paper count and disconnects when reaching the configured limit
-  - When matched_count >= max_match_limit, a `match_limit_reached` event is sent
+- Monitors matched paper count and disconnects when reaching the specified limit (if provided)
+  - When matched_count >= max_match_limit_per_user, a `match_limit_reached` event is sent
   - The connection is then closed to prevent further processing
 
 ## Note
@@ -997,7 +1065,9 @@ pub async fn stream_verify(
             user_id,
             Some(state.config.rss.max_rss_paper as i32),
             payload.channel,
-            Some(state.config.rss.max_match_limit_per_user as i32),
+            payload
+                .max_match_limit_per_user
+                .unwrap_or(state.config.rss.max_match_limit_per_user as i32),
         )
         .await
     {
@@ -1019,6 +1089,7 @@ pub struct UserVerifyInfoItem {
     pub token_usage: i64,
     pub matched_count: i64,
     pub max_match_limit: i64,
+    pub total_matched_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_info: Option<UserInfo>,
 }
@@ -1105,6 +1176,7 @@ pub async fn all_users_verify_info(
                     token_usage: info.token_usage,
                     matched_count: info.matched_count,
                     max_match_limit: info.max_match_limit,
+                    total_matched_count: info.total_matched_count,
                     user_info,
                 });
             }
