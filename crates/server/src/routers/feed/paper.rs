@@ -9,6 +9,7 @@ use crate::{
 };
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
+use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch as VerificationMatchEnum;
 use seaorm_db::query::feed::rss_papers::{
     GetUnverifiedPaperIdsParams, RssPaperDataWithDetail, RssPapersQuery,
 };
@@ -35,6 +36,12 @@ pub struct PapersRequest {
     pub channel: Option<String>,
     pub keyword: Option<String>,
     pub rss_source_id: Option<i32>,
+    #[serde(default = "default_verification_match")]
+    pub not_match: Option<VerificationMatchEnum>,
+}
+
+fn default_verification_match() -> Option<VerificationMatchEnum> {
+    Some(VerificationMatchEnum::Yes)
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -59,6 +66,7 @@ This endpoint returns papers from the user's RSS subscriptions that are waiting 
 - `channel` (optional): Filter papers by specific channel
 - `keyword` (optional): Search keyword to filter papers by title or content
 - `rss_source_id` (optional): Filter papers by specific RSS source ID
+- `not_match` (optional, default: "yes"): Filter papers by verification match status
 
 ## Returns
 Returns an `UnverifiedPapersResponse` object containing:
@@ -106,6 +114,7 @@ pub async fn unverified_papers(
         channel: payload.channel.clone(),
         keyword: payload.keyword.clone(),
         rss_source_id: payload.rss_source_id,
+        not_match: payload.not_match,
     };
 
     let rss_papers = RssPapersQuery::get_unverified_papers(&state.conn, user.id, params.clone())
