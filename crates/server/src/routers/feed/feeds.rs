@@ -133,6 +133,7 @@ pub async fn unverified_count_info(
     User(user): User,
 ) -> Result<ApiResponse<UserUnverifiedPapers>, ApiError> {
     tracing::info!("get unverified count");
+    tracing::info!("user id: {:?}", user);
 
     let count_result = get_user_unverified_papers_count_info(&state.conn, user.id)
         .await
@@ -354,6 +355,7 @@ pub async fn all_verified_papers(
     Json(payload): Json<AllVerifiedPapersRequest>,
 ) -> Result<ApiResponse<AllVerifiedPapersResponse>, ApiError> {
     tracing::info!("list all verified papers");
+    tracing::info!("user: {:?}", user);
 
     // Process time range, if start time is not specified, set to today's midnight
     let time_range = payload.time_range.map(|tr| {
@@ -1140,6 +1142,7 @@ pub async fn all_users_verify_info(
         "Getting verify info for all users, current user: {}",
         user.id
     );
+    tracing::info!("user id: {:?}", user);
 
     let verify_manager = VerifyManager::new(
         state.redis.clone().pool,

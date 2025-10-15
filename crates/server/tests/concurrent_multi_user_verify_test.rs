@@ -390,44 +390,66 @@ async fn setup_user_test_data(
     source_ids: &[i32],
     config: &conf::config::AppConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut rng = rand::rng();
+    info!("Setting up test data for user {}", user_id);
 
-    // Create user interests
-    let mut interests = vec![
-        "machine learning".to_string(),
-        "artificial intelligence".to_string(),
-        "deep learning".to_string(),
-        "computer vision".to_string(),
-        "natural language processing".to_string(),
+    // Create 4 interests related to AI and computer science
+    let interests = vec![
+        "Machine Learning and Deep Neural Networks".to_string(),
+        "Quantum Computing and Algorithms".to_string(),
+        "Distributed Systems and Cloud Computing".to_string(),
+        "Natural Language Processing".to_string(),
     ];
 
-    interests.shuffle(&mut rng);
-    let selected_interests: Vec<String> = interests
+    UserInterestsQuery::replace_many(db, user_id, interests.clone(), config.llm.model.clone())
+        .await?;
+
+    info!("Created {} interests for user {}", interests.len(), user_id);
+
+    // Use specific AI/ML/CS-related RSS sources that match our interests
+    // These sources have been verified to have substantial papers in the database:
+    // - 35: Machine Learning (2041 papers)
+    // - 13: Artificial Intelligence (1621 papers)
+    // - 20: Computer Vision (1126 papers)
+    // - 18: Computation and Language/NLP (763 papers)
+    // - 10: Artificial Intelligence (363 papers)
+    // - 23: Distributed, Parallel, and Cluster Computing
+    // - 165: Statistics Machine Learning (33 papers)
+    // - 41: Neural and Evolutionary Computing (32 papers)
+    let preferred_sources = vec![35, 13, 20, 18, 10, 23, 165, 41];
+
+    // Filter to only include sources that exist in the database
+    let selected_sources: Vec<i32> = preferred_sources
         .into_iter()
-        .take(4) // Each user selects 2 interests
+        .filter(|id| source_ids.contains(id))
         .collect();
 
-    UserInterestsQuery::replace_many(
-        db,
-        user_id,
-        selected_interests.clone(),
-        config.llm.model.clone(),
-    )
-    .await?;
+    if selected_sources.is_empty() {
+        warn!("None of the preferred CS sources exist, falling back to available sources");
+        let mut sources = source_ids.to_vec();
+        let mut rng = rand::rng();
+        sources.shuffle(&mut rng);
+        let selected_sources: Vec<i32> = sources.into_iter().take(8).collect();
+        RssSubscriptionsQuery::replace_many(db, user_id, selected_sources.clone()).await?;
+        info!(
+            "Created {} subscriptions for user {} (fallback)",
+            selected_sources.len(),
+            user_id
+        );
+        return Ok(());
+    }
 
-    // Randomly select subscriptions from existing sources
-    let mut sources = source_ids.to_vec();
-    sources.shuffle(&mut rng);
-    let max_sources = sources.len().clamp(5, 10); // Maximum 3, minimum 1
-    let selected_sources: Vec<i32> = sources.into_iter().take(max_sources).collect();
+    info!(
+        "Selecting {} CS-related subscriptions for user {}",
+        selected_sources.len(),
+        user_id
+    );
 
     RssSubscriptionsQuery::replace_many(db, user_id, selected_sources.clone()).await?;
 
     info!(
-        user_id,
-        interests = ?selected_interests,
-        sources = ?selected_sources,
-        "Created test data for user"
+        "Created {} subscriptions for user {}",
+        selected_sources.len(),
+        user_id
     );
 
     Ok(())
