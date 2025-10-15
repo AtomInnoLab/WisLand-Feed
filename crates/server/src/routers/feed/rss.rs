@@ -358,6 +358,7 @@ pub async fn rss_create(
     let id = RssSourcesQuery::insert(
         &state.conn,
         RssSourceData {
+            id: None,
             channel: payload.channel,
             name: payload.name,
             url: payload.url,
