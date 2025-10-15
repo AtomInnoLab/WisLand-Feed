@@ -33,6 +33,7 @@ verifier_user_prompt = "## question:\n{question}\n\n## search result:\n{search_r
 
 [search]
 serp_api_key = "fa709c7ccbd9f970e4ad48da07f7ad4e6a6b0ac30e8f50682dba30f8a7d47e02"
+paper_metadata = "https://scholarsearch.dev.atominnolab.com"
 
 [oss]
 access_key_id = "access_key_id"
