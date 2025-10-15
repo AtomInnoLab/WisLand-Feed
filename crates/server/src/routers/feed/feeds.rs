@@ -62,7 +62,7 @@ pub struct VerifyRequest {
     pub channel: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct AllVerifiedPapersRequest {
     #[serde(flatten)]
     pub pagination: Page,
@@ -308,7 +308,7 @@ pub async fn verify_detail(
 }
 
 #[utoipa::path(
-    post,
+    get,
     path = "/all-verified-papers",
     summary = "Get all verified papers",
     description = r#"
@@ -317,7 +317,7 @@ Retrieve a paginated list of all verified papers for the authenticated user.
 ## Overview
 This endpoint returns papers that have been verified against the user's interests, with various filtering and pagination options.
 
-## Request Parameters
+## Query Parameters
 - `page`: Page number (starts from 1)
 - `page_size`: Number of items per page
 - `channel` (optional): Filter by specific channel
@@ -341,7 +341,9 @@ Returns an `AllVerifiedPapersResponse` object containing:
 - `yesterday_count`: Count of papers verified yesterday
 - `older_than_three_days_count`: Count of papers verified more than 3 days ago
 "#,
-    request_body = AllVerifiedPapersRequest,
+    params(
+        AllVerifiedPapersRequest
+    ),
     responses(
         (status = 200, body = AllVerifiedPapersResponse, description = "Successfully retrieved verified papers with pagination and metadata"),
         (status = 401, description = "Unauthorized - valid authentication required"),
@@ -352,7 +354,7 @@ Returns an `AllVerifiedPapersResponse` object containing:
 pub async fn all_verified_papers(
     State(state): State<AppState>,
     User(user): User,
-    Json(payload): Json<AllVerifiedPapersRequest>,
+    Query(payload): Query<AllVerifiedPapersRequest>,
 ) -> Result<ApiResponse<AllVerifiedPapersResponse>, ApiError> {
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}", user);

@@ -79,7 +79,7 @@ pub struct SetInterestsRequest {
     path = "/interests",
     summary = "Set user's interests",
     description = r#"
-Update the user's interest list by replacing all existing interests with new ones.
+Update the user's interest list using incremental update logic.
 
 ## Overview
 This endpoint allows users to define or update their research interests. The system will use these interests to verify and match incoming RSS papers.
@@ -99,13 +99,14 @@ This endpoint allows users to define or update their research interests. The sys
 - `interests`: Array of interest keywords/phrases
 
 ## Behavior
-- **Replace Operation**: This endpoint replaces ALL existing interests with the new list
-- Old interests are removed
-- New interests are created
+- **Incremental Update**: This endpoint performs smart incremental updates based on set operations
+- **Same interests**: Existing interests that match the request are kept unchanged, but if they were previously soft-deleted (deleted_at is not null), they will be restored (deleted_at set to null)
+- **New interests**: Interests in the request that don't exist in the database are created as new records
+- **Removed interests**: Interests that exist in the database but are not in the request are soft-deleted (deleted_at is set to current timestamp)
 - Each interest gets embedded using the configured LLM model for semantic matching
 
 ## Returns
-Returns an array of `i64` IDs representing the newly created interest records.
+Returns an array of `i64` IDs representing the interest records that are now active (both restored and newly created).
 
 Example response:
 ```json
@@ -113,8 +114,9 @@ Example response:
 ```
 
 ## Side Effects
-- All previous interests for the user are deleted
+- Existing interests are preserved and restored if previously deleted
 - New interest records are created with embeddings
+- Removed interests are soft-deleted (not permanently removed)
 - Interest metadata may be updated for verification purposes
 
 ## Use Cases
@@ -122,20 +124,22 @@ Example response:
 - Update research focus areas
 - Refine paper matching criteria
 - Change verification preferences
+- Restore previously deleted interests
 
 ## Important Notes
-- This is a **complete replacement** operation, not an append
-- Empty array will remove all interests
+- This is an **incremental update** operation, not a complete replacement
+- Empty array will soft-delete all existing interests
+- Previously deleted interests can be restored by including them in the request
 - Interest embeddings are generated using the configured LLM model
 - Changes take effect immediately for new verifications
 
 ## Related Endpoints
-- Use `GET /interests` to retrieve current interests
+- Use `GET /interests` to retrieve current active interests
 - Trigger verification with `/verify` after updating interests
 "#,
     request_body = SetInterestsRequest,
     responses(
-        (status = 200, description = "Successfully set user's interests, returns array of new interest record IDs", body = Vec<i64>),
+        (status = 200, description = "Successfully set user's interests, returns array of active interest record IDs (both restored and newly created)", body = Vec<i64>),
         (status = 401, description = "Unauthorized - valid authentication required"),
         (status = 400, description = "Invalid request data"),
         (status = 500, description = "Database error or failed to generate embeddings"),
