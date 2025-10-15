@@ -67,8 +67,9 @@ pub struct AllVerifiedPapersRequest {
     #[serde(flatten)]
     pub pagination: Page,
     pub channel: Option<String>,
-    pub matches: Option<Vec<VerificationMatch>>,
-    pub user_interest_ids: Option<Vec<i64>>,
+    pub matches: Option<String>,
+    pub user_interest_ids: Option<String>,
+    #[serde(flatten)]
     pub time_range: Option<TimeRangeParam>,
     pub ignore_time_range: Option<bool>,
     pub keyword: Option<String>,
@@ -321,11 +322,10 @@ This endpoint returns papers that have been verified against the user's interest
 - `page`: Page number (starts from 1)
 - `page_size`: Number of items per page
 - `channel` (optional): Filter by specific channel
-- `matches` (optional): Filter by verification match types (Yes, No, Maybe)
-- `user_interest_ids` (optional): Filter by specific interest IDs
-- `time_range` (optional): Filter papers within a time range
-  - `start`: Start datetime (defaults to today's midnight if not specified)
-  - `end`: End datetime
+- `matches` (optional): Filter by verification match types as comma-separated string (e.g., "yes,no,partial")
+- `user_interest_ids` (optional): Filter by specific interest IDs as comma-separated string (e.g., "1,2,3,4")
+- `start` (optional): Start datetime for filtering papers
+- `end` (optional): End datetime for filtering papers
 - `ignore_time_range` (optional): Ignore time range filter
 - `keyword` (optional): Search keyword to filter papers by title or content
 - `rss_source_id` (optional): Filter papers by specific RSS source ID
@@ -359,6 +359,43 @@ pub async fn all_verified_papers(
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}", user);
 
+    // Parse comma-separated matches string to Vec<VerificationMatch>
+    let parsed_matches: Option<Vec<VerificationMatch>> =
+        payload.matches.as_ref().and_then(|matches_str| {
+            if matches_str.trim().is_empty() {
+                None
+            } else {
+                let matches: Result<Vec<VerificationMatch>, _> = matches_str
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| match s.to_lowercase().as_str() {
+                        "yes" => Ok(VerificationMatch::Yes),
+                        "no" => Ok(VerificationMatch::No),
+                        "partial" => Ok(VerificationMatch::Partial),
+                        _ => Err(format!("Invalid match value: {s}")),
+                    })
+                    .collect();
+                matches.ok()
+            }
+        });
+
+    // Parse comma-separated user_interest_ids string to Vec<i64>
+    let parsed_user_interest_ids: Option<Vec<i64>> =
+        payload.user_interest_ids.as_ref().and_then(|ids_str| {
+            if ids_str.trim().is_empty() {
+                None
+            } else {
+                let ids: Result<Vec<i64>, _> = ids_str
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.parse::<i64>())
+                    .collect();
+                ids.ok()
+            }
+        });
+
     // Process time range, if start time is not specified, set to today's midnight
     let time_range = payload.time_range.map(|tr| {
         let start = tr.start.unwrap_or_else(|| {
@@ -377,8 +414,8 @@ pub async fn all_verified_papers(
         user.id,
         ListVerifiedParams {
             channel: payload.channel.clone(),
-            matches: payload.matches.clone(),
-            user_interest_ids: payload.user_interest_ids.clone(),
+            matches: parsed_matches,
+            user_interest_ids: parsed_user_interest_ids,
             time_range,
             offset: payload.pagination.offset(),
             limit: payload.pagination.page_size(),
