@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// used for page request
-#[derive(Serialize, Deserialize, utoipa::ToSchema, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, utoipa::ToSchema, utoipa::IntoParams, Debug, Clone, Copy)]
 pub struct Page {
     /// Current page number, Default is 1
     #[serde(default = "default_page_no")]
