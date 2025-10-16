@@ -6,6 +6,7 @@ use crate::{
 };
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
+use feed::redis::verify_manager::VerifyManager;
 use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch as VerificationMatchEnum;
 use seaorm_db::query::feed::rss_papers::{
     GetUnverifiedPaperIdsParams, RssPaperDataWithDetail, RssPapersQuery,
@@ -110,6 +111,22 @@ pub async fn unverified_papers(
     Query(payload): Query<PapersRequest>,
 ) -> Result<ApiResponse<UnverifiedPapersResponse>, ApiError> {
     tracing::info!("get papers");
+
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    verify_manager
+        .check_and_update_subscriptions_if_needed(user.id, payload.channel.as_deref())
+        .await
+        .map_err(|e| ApiError::CustomError {
+            message: e.to_string(),
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        })?;
 
     // Check if pagination parameters are provided
     let use_pagination = payload.page.is_some() || payload.page_size.is_some();
