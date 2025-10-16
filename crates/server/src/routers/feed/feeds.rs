@@ -466,6 +466,12 @@ pub async fn all_verified_papers(
     let source_map: HashMap<i32, rss_sources::Model> =
         sources.into_iter().map(|m| (m.id, m)).collect();
 
+    // 补充 interest_map 中存在但 user_interest_stats 中不存在的统计数据
+    let mut user_interest_stats = verified_papers.user_interest_stats;
+    for interest_id in interest_map.keys() {
+        user_interest_stats.entry(*interest_id).or_insert(0);
+    }
+
     Ok(ApiResponse::data(AllVerifiedPapersResponse {
         pagination: Pagination {
             page: payload.pagination.page(),
@@ -476,7 +482,7 @@ pub async fn all_verified_papers(
         papers: verified_papers.items,
         interest_map,
         source_map,
-        user_interest_stats: verified_papers.user_interest_stats,
+        user_interest_stats,
         today_count: verified_papers.today_count,
         yesterday_count: verified_papers.yesterday_count,
         older_than_three_days_count: verified_papers.older_than_three_days_count,
