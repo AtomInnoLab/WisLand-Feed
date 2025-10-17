@@ -1097,7 +1097,7 @@ pub async fn stream_verify(
                             let event_data = serde_json::json!({
                                 "type": "verify_paper_success",
                                 "verification_details": result_with_stats.verification_details,
-                                "user_verify_info": result_with_stats.user_verify_info,
+                                "verify_info": result_with_stats.user_verify_info,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                 "status": "connected",
                                 "is_completed": false,
