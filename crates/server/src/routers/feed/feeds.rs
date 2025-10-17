@@ -1001,7 +1001,7 @@ pub async fn stream_verify(
                     None
                 }
                 // Send heartbeat message periodically
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {
                     // Get current verify info for heartbeat
                     let verify_info = match verify_manager_clone.get_user_unverified_info(user_id).await {
                         Ok(info) => info,
