@@ -6,9 +6,13 @@ use crate::{
 };
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
-use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch as VerificationMatchEnum;
+use feed::redis::verify_manager::VerifyManager;
 use seaorm_db::query::feed::rss_papers::{
     GetUnverifiedPaperIdsParams, RssPaperDataWithDetail, RssPapersQuery,
+};
+use seaorm_db::{
+    entities::feed::sea_orm_active_enums::VerificationMatch as VerificationMatchEnum,
+    query::feed::rss_subscriptions::RssSubscriptionsQuery,
 };
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -110,6 +114,27 @@ pub async fn unverified_papers(
     Query(payload): Query<PapersRequest>,
 ) -> Result<ApiResponse<UnverifiedPapersResponse>, ApiError> {
     tracing::info!("get papers");
+
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    if verify_manager.is_day_gap(user.id).await? {
+        RssSubscriptionsQuery::update_subscription_latest_paper_ids(
+            &state.conn,
+            user.id,
+            payload.channel.as_deref(),
+        )
+        .await
+        .context(DbErrSnafu {
+            stage: "update-subscription-latest-paper-ids",
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        })?;
+    }
 
     // Check if pagination parameters are provided
     let use_pagination = payload.page.is_some() || payload.page_size.is_some();
