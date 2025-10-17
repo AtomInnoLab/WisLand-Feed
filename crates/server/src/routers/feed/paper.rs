@@ -136,6 +136,8 @@ pub async fn unverified_papers(
         })?;
     }
 
+    verify_manager.wait_user_lock(user.id).await?;
+
     // Check if pagination parameters are provided
     let use_pagination = payload.page.is_some() || payload.page_size.is_some();
 
