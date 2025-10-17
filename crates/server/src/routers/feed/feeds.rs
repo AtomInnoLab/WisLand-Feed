@@ -13,7 +13,7 @@ use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
 use feed::redis::pubsub::RedisPubSubManager;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
-use feed::redis::verify_manager::VerifyManager;
+use feed::redis::verify_manager::{UserVerifyInfo, VerifyManager};
 use feed::workers::update_user_interest_metadata::run_update_user_interest_metadata;
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use futures::stream::{self, Stream};
@@ -78,6 +78,7 @@ pub struct AllVerifiedPapersRequest {
 
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
 pub struct AllVerifiedPapersResponse {
+    pub verify_info: UserVerifyInfo,
     pub pagination: Pagination,
     pub papers: Vec<VerifiedPaperItem>,
     pub interest_map: HashMap<i64, String>,
@@ -472,6 +473,16 @@ pub async fn all_verified_papers(
         user_interest_stats.entry(*interest_id).or_insert(0);
     }
 
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    let verify_info = verify_manager.get_user_unverified_info(user.id).await?;
+
     Ok(ApiResponse::data(AllVerifiedPapersResponse {
         pagination: Pagination {
             page: payload.pagination.page(),
@@ -482,6 +493,7 @@ pub async fn all_verified_papers(
         papers: verified_papers.items,
         interest_map,
         source_map,
+        verify_info,
         user_interest_stats,
         today_count: verified_papers.today_count,
         yesterday_count: verified_papers.yesterday_count,
@@ -965,6 +977,7 @@ pub async fn stream_verify(
                 let completion_event_data = serde_json::json!({
                     "type": "verify_completed",
                     "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "verify_info": verify_info,
                     "status": "completed",
                     "is_completed": true,
                 });

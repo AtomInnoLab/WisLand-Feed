@@ -143,7 +143,7 @@ async fn test_single_user_verification_with_limits() -> Result<(), Box<dyn std::
         "Cleaning up any existing verification data for user {}",
         test_user_id
     );
-    let _ = verify_manager.finish_user_verify(test_user_id).await;
+    let _ = verify_manager.finish_user_verify(test_user_id, None).await;
 
     // 3. Setup PubSub listener to collect messages
     let pubsub_manager = RedisPubSubManager::new(redis_url.as_str()).await;

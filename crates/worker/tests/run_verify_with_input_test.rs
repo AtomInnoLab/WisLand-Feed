@@ -68,6 +68,11 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
         .venue(Some("Nowhere 2025".to_string()))
         .pdf_url(Some("https://example.com/paper.pdf".to_string()))
         .cites(None)
+        .doi(None)
+        .affiliations(Some("Affiliation 1".to_string()))
+        .conference_journal(None)
+        .conference_journal_type(None)
+        .research_field(None)
         .build();
     info!(title = %paper.title, authors = %paper.authors.join(", "), venue = ?paper.venue, url = ?paper.url, "constructed paper input");
 
@@ -86,7 +91,7 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
                 .await
                 .expect("Could not connect redis"),
         },
-        search::agent::verify::ToBeVerified::Paper(paper),
+        search::agent::verify::ToBeVerified::Paper(Box::new(paper)),
         criteria,
         original_query,
     )
