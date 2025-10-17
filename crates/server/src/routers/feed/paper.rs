@@ -6,7 +6,6 @@ use crate::{
 };
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
-use feed::redis::verify_manager::VerifyManager;
 use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch as VerificationMatchEnum;
 use seaorm_db::query::feed::rss_papers::{
     GetUnverifiedPaperIdsParams, RssPaperDataWithDetail, RssPapersQuery,

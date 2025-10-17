@@ -3,7 +3,6 @@ use seaorm_db::query::feed::user_paper_verifications::UserPaperVerificationsQuer
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use dotenvy::dotenv;
 
 #[tokio::test]
 async fn test_exists_by_user_paper_interest() -> Result<(), Box<dyn std::error::Error>> {
