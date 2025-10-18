@@ -964,6 +964,38 @@ pub async fn stream_verify(
                 .get_user_unverified_info(user_id)
                 .await
                 .unwrap();
+
+            // Check if match limit has been reached
+            if verify_info.max_match_limit > 0
+                && verify_info.matched_count >= verify_info.max_match_limit
+            {
+                tracing::info!(
+                    "Match limit reached for user {}: matched={}, max_limit={}. Sending match_limit_reached event and disconnecting SSE stream.",
+                    user_id,
+                    verify_info.matched_count,
+                    verify_info.max_match_limit
+                );
+
+                let limit_event_data = serde_json::json!({
+                    "type": "match_limit_reached",
+                    "user_id": user_id,
+                    "matched": verify_info.matched_count,
+                    "max_limit": verify_info.max_match_limit,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "status": "limit_reached",
+                });
+
+                let limit_event: Result<Event, ApiError> = Ok(Event::default()
+                    .event("match_limit_reached")
+                    .data(format!("data: {limit_event_data}")));
+
+                is_completed = true;
+                return Some((
+                    limit_event,
+                    (monitor, receiver, verify_manager_clone, is_completed),
+                ));
+            }
+
             let verification_completed = verify_info.total == 0
                 || (verify_info.success_count + verify_info.fail_count) == verify_info.total;
 
@@ -1033,50 +1065,6 @@ pub async fn stream_verify(
                         Ok(message) => {
                             tracing::info!("Forwarding Redis message to SSE for user {}", user_id);
 
-                            // Check if match limit has been reached
-                            let limit_reached = match verify_manager_clone.get_user_unverified_info(user_id).await {
-                                Ok(verify_info) => {
-                                    // Check if matched >= max_limit
-                                    if verify_info.max_match_limit > 0 && verify_info.matched_count >= verify_info.max_match_limit {
-                                        Some((verify_info.matched_count, verify_info.max_match_limit))
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Failed to get user unverified info for user {}: {}", user_id, e);
-                                    None
-                                }
-                            };
-
-                            // If limit reached, send event and disconnect
-                            if let Some((matched, max_limit)) = limit_reached {
-                                tracing::info!(
-                                    "Match limit reached for user {}: matched={}, max_limit={}. Sending match_limit_reached event and disconnecting SSE stream.",
-                                    user_id,
-                                    matched,
-                                    max_limit
-                                );
-
-                                // Send match_limit_reached event before disconnecting
-                                let limit_event_data = serde_json::json!({
-                                    "type": "match_limit_reached",
-                                    "user_id": user_id,
-                                    "matched": matched,
-                                    "max_limit": max_limit,
-                                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                                    "status": "limit_reached",
-                                });
-
-                                let limit_event: Result<Event, ApiError> = Ok(Event::default()
-                                    .event("match_limit_reached")
-                                    .data(format!("data: {limit_event_data}")));
-
-                                // Return the event and set is_completed to true to trigger disconnection on next iteration
-                                is_completed = true;
-                                return Some((limit_event, (monitor, receiver, verify_manager_clone, is_completed)));
-                            }
-
                             // Parse the message as VerifyResultWithStats
                             let result_with_stats: VerifyResultWithStats = match serde_json::from_str(&message) {
                                 Ok(value) => value,
@@ -1107,6 +1095,7 @@ pub async fn stream_verify(
                                 .event("verify_paper_success")
                                 .data(format!("data: {event_data}")));
 
+                            // Return the event (limit check will happen on next iteration)
                             Some((event, (monitor, receiver, verify_manager_clone, is_completed)))
                         }
                         Err(_) => {

@@ -241,8 +241,8 @@ async fn test_concurrent_append_and_query() -> Result<(), Box<dyn std::error::Er
         let mut lengths = vec![];
         let mut paper_ids_sets = vec![];
 
-        for result in query_results {
-            if let Ok((req_num, Ok(response))) = result {
+        for (req_num, response) in query_results.into_iter().flatten() {
+            if let Ok(response) = response {
                 let data = response.data;
                 totals.push(data.pagination.total);
                 lengths.push(data.papers.len());
@@ -267,8 +267,8 @@ async fn test_concurrent_append_and_query() -> Result<(), Box<dyn std::error::Er
         // 6. Collect and verify all_verified_papers results
         let mut verified_lengths = vec![];
 
-        for result in verified_results {
-            if let Ok((req_num, Ok(response))) = result {
+        for (req_num, response) in verified_results.into_iter().flatten() {
+            if let Ok(response) = response {
                 let data = response.data;
                 verified_lengths.push(data.papers.len());
 
