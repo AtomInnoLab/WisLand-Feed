@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   annotations:
-  name: nginx-model-prod-service-canary
+  name: wisland-feed-prod-service-canary
   namespace: prod-ns
 spec:
   internalTrafficPolicy: Cluster
@@ -11,15 +11,15 @@ spec:
   ipFamilyPolicy: SingleStack
   ports:
     - name: tcp80
-      port: 80
+      port: 3500
       protocol: TCP
-      targetPort: 80
+      targetPort: 3500
     - name: tcp443
       port: 443
       protocol: TCP
-      targetPort: 80
+      targetPort: 3500
   selector:
-    app: nginx-model-prod-canary
+    app: wisland-feed-prod-canary
     version: v2
   sessionAffinity: None
   type: ClusterIP

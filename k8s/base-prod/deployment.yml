@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx-model-prod
+  name: wisland-feed-prod
   namespace: prod-ns
 spec:
   progressDeadlineSeconds: 600
@@ -9,7 +9,7 @@ spec:
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      app: nginx-model-prod
+      app: wisland-feed-prod
       version: v1
   strategy:
     rollingUpdate:
@@ -20,11 +20,25 @@ spec:
     metadata:
       creationTimestamp: null
       labels:
-        app: nginx-model-prod
+        app: wisland-feed-prod
         version: v1
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - wisland-feed-prod
+              topologyKey: topology.kubernetes.io/zone
       containers:
-        - image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/nginx-model-prod:20250920142148
+        - env:
+            - name: aliyun_logs_wisland-feed-server-prod
+              value: stdout
+          image: >-
+            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20251020175526
           imagePullPolicy: IfNotPresent
           livenessProbe:
             failureThreshold: 3
@@ -32,11 +46,11 @@ spec:
             periodSeconds: 10
             successThreshold: 1
             tcpSocket:
-              port: 80
+              port: 3500
             timeoutSeconds: 5
-          name: nginx-model-prod
+          name: wisland-feed-prod-server
           ports:
-            - containerPort: 80
+            - containerPort: 3500
               protocol: TCP
           readinessProbe:
             failureThreshold: 3
@@ -44,17 +58,41 @@ spec:
             periodSeconds: 5
             successThreshold: 1
             tcpSocket:
-              port: 80
+              port: 3500
             timeoutSeconds: 3
           resources:
             limits:
-              cpu: 0.5
-              memory: 0.5Gi
+              cpu: '2'
+              memory: 2Gi
             requests:
-              cpu: 0.5
-              memory: 0.5Gi
+              cpu: '2'
+              memory: 2Gi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-prod
+              subPath: .env
+        - env:
+            - name: aliyun_logs_wisland-feed-worker-prod
+              value: stdout
+          image: >-
+            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20251020175526
+          imagePullPolicy: IfNotPresent
+          name: wisland-feed-prod-worker
+          resources:
+            limits:
+              cpu: 2
+              memory: 2Gi
+            requests:
+              cpu: 2
+              memory: 2Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-prod
+              subPath: .env
       dnsPolicy: ClusterFirst
       nodeSelector:
         type: virtual-kubelet
@@ -62,29 +100,12 @@ spec:
       schedulerName: default-scheduler
       securityContext: {}
       terminationGracePeriodSeconds: 120
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - nginx-model-prod
-              topologyKey: kubernetes.io/hostname
-          - weight: 50
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - nginx-model-prod
-              topologyKey: topology.kubernetes.io/zone
-
       tolerations:
-      - effect: NoSchedule
-        key: virtual-kubelet.io/provider
-        operator: Exists
+        - effect: NoSchedule
+          key: virtual-kubelet.io/provider
+          operator: Exists
+      volumes:
+        - name: volume-wisland-feed-prod
+          secret:
+            defaultMode: 420
+            secretName: wisland-feed-prod

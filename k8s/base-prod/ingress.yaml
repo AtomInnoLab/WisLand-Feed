@@ -2,39 +2,41 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
-    alb.ingress.kubernetes.io/backend-keepalive: 'true'
-    alb.ingress.kubernetes.io/connection-drain-enabled: 'true'
-    alb.ingress.kubernetes.io/cookie-timeout: '1800'
-    alb.ingress.kubernetes.io/healthcheck-code: 'http_2xx,http_3xx,http_4xx'
+    # 健康检查
+    alb.ingress.kubernetes.io/healthcheck-connect-port: '0'
     alb.ingress.kubernetes.io/healthcheck-enabled: 'true'
-    alb.ingress.kubernetes.io/healthcheck-httpversion: HTTP1.1
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: '2'
-    alb.ingress.kubernetes.io/healthcheck-method: HEAD
-    alb.ingress.kubernetes.io/healthcheck-path: /
-    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-protocol: TCP
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
     alb.ingress.kubernetes.io/healthy-threshold-count: '3'
-    alb.ingress.kubernetes.io/sticky-session: 'true'
     alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},{"HTTPS": 443}]'
+    # 会话保持
+    alb.ingress.kubernetes.io/sticky-session: "true"
+    # cookie超时
+    alb.ingress.kubernetes.io/cookie-timeout: "1800"
+    # 后端长连接
+    alb.ingress.kubernetes.io/backend-keepalive: "true"
+    # 开启“连接优雅中断”
+    alb.ingress.kubernetes.io/connection-drain-enabled: "true"
+    # 同时支持 http、https（若不配置，有证书时不支持http）
+    # 1.只有 http：  [{"HTTP": 80}]
+    # 2.只有 https： [{"HTTPS": 443}]
+    # 3.同时http+s： [{"HTTP": 80},{"HTTPS": 443}]
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
   labels:
     ingress-controller: alb
-  name: nginx-model-prod-ingress
+  name: wisland-feed-prod-ingress
   namespace: prod-ns
 spec:
   ingressClassName: alb
   rules:
-    - host: prod-nginx-model.dev.atominnolab.com
+    - host: wisland-feed.wispaper.inner
       http:
         paths:
           - backend:
               service:
-                name: nginx-model-prod-service
+                name: wisland-feed-prod-service
                 port:
-                  number: 80
+                  number: 3500
             path: /
             pathType: Prefix
-  tls:
-    - hosts:
-        - prod-nginx-model.dev.atominnolab.com
-      secretName: ssl-dev.atominnotab.com
