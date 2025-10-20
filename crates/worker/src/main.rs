@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration and output key startup information
     let cfg = app_config();
     info!(target: "feed", redis_prefix = %cfg.rss.feed_redis.redis_prefix, "Starting feed workers"); // Initialize logging
-    let _guard = config.init_log(true);
+    let _guard = cfg.init_log(true);
 
     // Initialize and start workers (Monitor registration is completed inside init)
     manager::entry::init().await?;
