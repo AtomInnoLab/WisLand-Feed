@@ -66,6 +66,8 @@ pub struct VerifyRequest {
 pub struct AllVerifiedPapersRequest {
     #[serde(flatten)]
     pub pagination: Page,
+    /// Whether to ignore pagination and return all data (optional, defaults to false)
+    pub ignore_pagination: Option<bool>,
     pub channel: Option<String>,
     pub matches: Option<String>,
     pub user_interest_ids: Option<String>,
@@ -322,6 +324,7 @@ This endpoint returns papers that have been verified against the user's interest
 ## Query Parameters
 - `page`: Page number (starts from 1)
 - `page_size`: Number of items per page
+- `ignore_pagination` (optional): Whether to ignore pagination and return all data (defaults to false)
 - `channel` (optional): Filter by specific channel
 - `matches` (optional): Filter by verification match types as comma-separated string (e.g., "yes,no,partial")
 - `user_interest_ids` (optional): Filter by specific interest IDs as comma-separated string (e.g., "1,2,3,4")
@@ -410,6 +413,19 @@ pub async fn all_verified_papers(
         (Some(start), tr.end)
     });
 
+    // Check if pagination should be ignored
+    let use_pagination = !payload.ignore_pagination.unwrap_or(false);
+
+    // If pagination is enabled, use pagination; otherwise return all data
+    let (offset, limit) = if use_pagination {
+        (
+            Some(payload.pagination.offset()),
+            Some(payload.pagination.page_size()),
+        )
+    } else {
+        (None, None)
+    };
+
     let verified_papers = UserPaperVerificationsQuery::list_verified_by_user(
         &state.conn,
         user.id,
@@ -418,8 +434,8 @@ pub async fn all_verified_papers(
             matches: parsed_matches,
             user_interest_ids: parsed_user_interest_ids,
             time_range,
-            offset: payload.pagination.offset(),
-            limit: payload.pagination.page_size(),
+            offset, // 使用计算出的 offset
+            limit,  // 使用计算出的 limit
             ignore_time_range: payload.ignore_time_range,
             keyword: payload.keyword.clone(),
             rss_source_id: payload.rss_source_id,
@@ -484,11 +500,21 @@ pub async fn all_verified_papers(
     let verify_info = verify_manager.get_user_unverified_info(user.id).await?;
 
     Ok(ApiResponse::data(AllVerifiedPapersResponse {
-        pagination: Pagination {
-            page: payload.pagination.page(),
-            page_size: payload.pagination.page_size(),
-            total: verified_papers.total,
-            total_pages: verified_papers.total / payload.pagination.page_size() as u64,
+        pagination: if use_pagination {
+            Pagination {
+                page: payload.pagination.page(),
+                page_size: payload.pagination.page_size(),
+                total: verified_papers.total,
+                total_pages: verified_papers.total / payload.pagination.page_size() as u64,
+            }
+        } else {
+            // When not using pagination, return pagination info for all data
+            Pagination {
+                page: 1,
+                page_size: verified_papers.total as i32,
+                total: verified_papers.total,
+                total_pages: 1,
+            }
         },
         papers: verified_papers.items,
         interest_map,
