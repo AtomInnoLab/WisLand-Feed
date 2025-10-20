@@ -997,7 +997,7 @@ pub async fn stream_verify(
             }
 
             let verification_completed = verify_info.total == 0
-                || (verify_info.success_count + verify_info.fail_count) == verify_info.total;
+                || (verify_info.success_count + verify_info.fail_count) >= verify_info.total;
 
             if verification_completed {
                 // If completed, send completion event and mark as completed
