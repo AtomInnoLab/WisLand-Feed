@@ -391,6 +391,29 @@ pub async fn all_verified_papers(
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}, payload: {:?}", user, payload);
 
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    if verify_manager.is_day_gap(user.id).await? {
+        RssSubscriptionsQuery::update_subscription_latest_paper_ids(
+            &state.conn,
+            user.id,
+            payload.channel.as_deref(),
+        )
+        .await
+        .context(DbErrSnafu {
+            stage: "update-subscription-latest-paper-ids",
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        })?;
+    }
+
+    verify_manager.wait_user_lock(user.id).await?;
+
     // Parse comma-separated matches string to Vec<VerificationMatch>
     let parsed_matches: Option<Vec<VerificationMatch>> =
         payload.matches.as_ref().and_then(|matches_str| {
