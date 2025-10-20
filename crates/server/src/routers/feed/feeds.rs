@@ -388,7 +388,7 @@ pub async fn all_verified_papers(
     Query(payload): Query<AllVerifiedPapersRequest>,
 ) -> Result<ApiResponse<AllVerifiedPapersResponse>, ApiError> {
     tracing::info!("list all verified papers");
-    tracing::info!("user: {:?}", user);
+    tracing::info!("user: {:?}, payload: {:?}", user, payload);
 
     // Parse comma-separated matches string to Vec<VerificationMatch>
     let parsed_matches: Option<Vec<VerificationMatch>> =

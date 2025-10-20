@@ -10,6 +10,9 @@ async fn main() -> Result<(), BoxError> {
     dotenv().ok();
     let config = app_config();
 
+    // Initialize logging
+    let _guard = config.init_log(true);
+
     let (router, state) = build_app().await?;
     info!("init server successfully");
 
