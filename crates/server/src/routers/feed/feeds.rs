@@ -1,5 +1,5 @@
 use super::FEED_TAG;
-use crate::model::page::{Page, Pagination};
+use crate::model::page::{Page, Pagination, de_opt_i32_from_any};
 use crate::{
     middlewares::auth::{User, UserInfo},
     model::base::ApiResponse,
@@ -62,7 +62,7 @@ pub struct VerifyRequest {
     pub channel: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AllVerifiedPapersRequest {
     #[serde(flatten)]
     pub pagination: Page,
@@ -75,6 +75,33 @@ pub struct AllVerifiedPapersRequest {
     pub time_range: Option<TimeRangeParam>,
     pub ignore_time_range: Option<bool>,
     pub keyword: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_i32_from_any")]
+    pub rss_source_id: Option<i32>,
+}
+
+/// OpenAPI 参数声明专用：避免 `#[serde(flatten)]` 与 `IntoParams` 组合导致的类型退化为 string
+#[derive(Debug, utoipa::IntoParams)]
+pub struct AllVerifiedPapersParams {
+    /// Page number (starts from 1)
+    pub page: Option<i32>,
+    /// Number of items per page
+    pub page_size: Option<i32>,
+    /// Whether to ignore pagination and return all data
+    pub ignore_pagination: Option<bool>,
+    pub channel: Option<String>,
+    /// Comma-separated match types: yes,no,partial
+    pub matches: Option<String>,
+    /// Comma-separated interest IDs
+    pub user_interest_ids: Option<String>,
+    /// Start datetime for filtering papers
+    pub start: Option<DateTime<FixedOffset>>,
+    /// End datetime for filtering papers
+    pub end: Option<DateTime<FixedOffset>>,
+    /// Ignore time range filter
+    pub ignore_time_range: Option<bool>,
+    /// Search keyword to filter papers by title or content
+    pub keyword: Option<String>,
+    /// Filter papers by specific RSS source ID
     pub rss_source_id: Option<i32>,
 }
 
@@ -346,7 +373,7 @@ Returns an `AllVerifiedPapersResponse` object containing:
 - `older_than_three_days_count`: Count of papers verified more than 3 days ago
 "#,
     params(
-        AllVerifiedPapersRequest
+        AllVerifiedPapersParams
     ),
     responses(
         (status = 200, body = AllVerifiedPapersResponse, description = "Successfully retrieved verified papers with pagination and metadata"),
