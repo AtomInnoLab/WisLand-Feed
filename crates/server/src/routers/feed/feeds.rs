@@ -134,6 +134,7 @@ pub struct DeletePapersRequest {
 pub struct StreamVerifyRequest {
     pub channel: Option<String>,
     pub max_match_limit_per_user: Option<i32>,
+    pub search_params: Option<ListVerifiedParams>,
 }
 
 #[utoipa::path(
@@ -1003,9 +1004,27 @@ pub async fn stream_verify(
     )
     .await;
 
+    // Capture needed vars for SSE closure to avoid moving out of captured variables
+    let search_params_for_sse = payload.search_params.clone().map(std::sync::Arc::new);
+    let conn_clone_for_sse = state.conn.clone();
+
     let stream = stream::unfold(
-        (monitor, rx, verify_manager.clone(), false), // Add completion flag
-        move |(monitor, mut receiver, verify_manager_clone, mut is_completed)| async move {
+        (
+            monitor,
+            rx,
+            verify_manager.clone(),
+            false, // Add completion flag
+            search_params_for_sse.clone(),
+            conn_clone_for_sse.clone(),
+        ),
+        move |(
+            monitor,
+            mut receiver,
+            verify_manager_clone,
+            mut is_completed,
+            search_params_for_sse,
+            conn_clone_for_sse,
+        )| async move {
             // Check if connection is still active or already completed
             if !monitor.is_connected() || is_completed {
                 tracing::info!("Ending SSE stream for user: {}", user_id);
@@ -1045,12 +1064,20 @@ pub async fn stream_verify(
                 is_completed = true;
                 return Some((
                     limit_event,
-                    (monitor, receiver, verify_manager_clone, is_completed),
+                    (
+                        monitor,
+                        receiver,
+                        verify_manager_clone,
+                        is_completed,
+                        search_params_for_sse,
+                        conn_clone_for_sse,
+                    ),
                 ));
             }
 
             let verification_completed = verify_info.total == 0
-                || (verify_info.success_count + verify_info.fail_count) >= verify_info.total;
+                || (verify_info.success_count + verify_info.fail_count) >= verify_info.total
+                || (verify_info.processing_count + verify_info.pending_unverify_count) == 0;
 
             if verification_completed {
                 // If completed, send completion event and mark as completed
@@ -1074,7 +1101,14 @@ pub async fn stream_verify(
                 is_completed = true;
                 return Some((
                     completion_event,
-                    (monitor, receiver, verify_manager_clone, is_completed),
+                    (
+                        monitor,
+                        receiver,
+                        verify_manager_clone,
+                        is_completed,
+                        search_params_for_sse,
+                        conn_clone_for_sse,
+                    ),
                 ));
             }
 
@@ -1110,7 +1144,17 @@ pub async fn stream_verify(
                         .event("heartbeat")
                         .data(format!("data: {event_data}")));
 
-                    Some((event, (monitor, receiver, verify_manager_clone, is_completed)))
+                    Some((
+                        event,
+                        (
+                            monitor,
+                            receiver,
+                            verify_manager_clone,
+                            is_completed,
+                            search_params_for_sse,
+                            conn_clone_for_sse,
+                        ),
+                    ))
                 }
                 // Receive Redis PubSub messages
                 result = receiver.recv() => {
@@ -1129,13 +1173,43 @@ pub async fn stream_verify(
                                     // Skip this message and continue to next iteration
                                     return Some((
                                         Ok(Event::default().event("error").data("data: {\"type\":\"error\",\"message\":\"Failed to parse message\"}")),
-                                        (monitor, receiver, verify_manager_clone, is_completed)
+                                        (
+                                            monitor,
+                                            receiver,
+                                            verify_manager_clone,
+                                            is_completed,
+                                            search_params_for_sse,
+                                            conn_clone_for_sse,
+                                        )
                                     ));
                                 }
                             };
 
-                            // Always send verify_paper_success message with the complete result_with_stats
-                            let event_data = serde_json::json!({
+
+
+                            // Optionally compute statistics and embed into event payload
+                            let mut statistics_json: Option<serde_json::Value> = None;
+                            let sp = search_params_for_sse.clone();
+                            if let Some(sp) = sp {
+                                let params = (*sp).clone();
+                                match UserPaperVerificationsQuery::get_verified_statistics_by_user(
+                                    &conn_clone_for_sse,
+                                    user_id,
+                                    params,
+                                )
+                                .await
+                                {
+                                    Ok(stats) => {
+                                        statistics_json = Some(serde_json::to_value(stats).unwrap_or_else(|_| serde_json::json!({})));
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("failed to get verified statistics: {}", e);
+                                    }
+                                }
+                            }
+
+                            // Build verify_paper_success payload
+                            let mut event_obj = serde_json::json!({
                                 "type": "verify_paper_success",
                                 "verification_details": result_with_stats.verification_details,
                                 "verify_info": result_with_stats.user_verify_info,
@@ -1143,13 +1217,29 @@ pub async fn stream_verify(
                                 "status": "connected",
                                 "is_completed": false,
                             });
+                            if let Some(stats) = statistics_json {
+                                if let Some(map) = event_obj.as_object_mut() {
+                                    map.insert("statistics".to_string(), stats);
+                                }
+                            }
+                            let event_data = event_obj;
 
                             let event: Result<Event, ApiError> = Ok(Event::default()
                                 .event("verify_paper_success")
                                 .data(format!("data: {event_data}")));
 
                             // Return the event (limit check will happen on next iteration)
-                            Some((event, (monitor, receiver, verify_manager_clone, is_completed)))
+                            Some((
+                                event,
+                                (
+                                    monitor,
+                                    receiver,
+                                    verify_manager_clone,
+                                    is_completed,
+                                    search_params_for_sse,
+                                    conn_clone_for_sse,
+                                ),
+                            ))
                         }
                         Err(_) => {
                             tracing::warn!("Redis message receiver closed for user {}", user_id);
