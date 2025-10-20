@@ -1,13 +1,20 @@
+use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize};
 
 /// used for page request
 #[derive(Serialize, Deserialize, utoipa::ToSchema, utoipa::IntoParams, Debug, Clone, Copy)]
 pub struct Page {
     /// Current page number, Default is 1
-    #[serde(default = "default_page_no")]
+    #[serde(
+        default = "default_page_no",
+        deserialize_with = "crate::model::page::de_i32_from_any"
+    )]
     page: i32,
     /// Number of items per page, Default is 20
-    #[serde(default = "default_page_size")]
+    #[serde(
+        default = "default_page_size",
+        deserialize_with = "crate::model::page::de_i32_from_any"
+    )]
     page_size: i32,
 }
 
@@ -52,4 +59,48 @@ fn default_page_no() -> i32 {
 
 fn default_page_size() -> i32 {
     20 // Default page size
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum I32OrString {
+    I(i64),
+    S(String),
+}
+
+pub fn de_i32_from_any<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = I32OrString::deserialize(deserializer)?;
+    match v {
+        I32OrString::I(n) => i32::try_from(n).map_err(|_| D::Error::custom("out of range for i32")),
+        I32OrString::S(s) => s
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| D::Error::custom("invalid i32 string")),
+    }
+}
+
+pub fn de_opt_i32_from_any<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<I32OrString>::deserialize(deserializer)?;
+    match v {
+        None => Ok(None),
+        Some(I32OrString::I(n)) => i32::try_from(n)
+            .map(Some)
+            .map_err(|_| D::Error::custom("out of range for i32")),
+        Some(I32OrString::S(s)) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                s.trim()
+                    .parse::<i32>()
+                    .map(Some)
+                    .map_err(|_| D::Error::custom("invalid i32 string"))
+            }
+        }
+    }
 }
