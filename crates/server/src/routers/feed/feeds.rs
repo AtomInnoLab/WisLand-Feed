@@ -978,6 +978,7 @@ pub async fn stream_verify(
         state.config.clone(),
         state.conn.clone(),
         state.redis.pool.clone(),
+        state.config.llm.model.to_string(),
     )
     .await;
     if result.is_err() {

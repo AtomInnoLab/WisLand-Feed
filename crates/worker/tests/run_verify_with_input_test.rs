@@ -93,6 +93,7 @@ async fn test_run_verify_with_input_smoke() -> Result<(), Box<dyn std::error::Er
         },
         search::agent::verify::ToBeVerified::Paper(Box::new(paper)),
         criteria,
+        "WisModel-20250821-8B-strict".to_string(),
         original_query,
     )
     .await?;

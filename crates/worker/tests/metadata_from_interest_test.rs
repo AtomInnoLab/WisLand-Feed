@@ -45,9 +45,13 @@ async fn test_metadata_from_interest_returns_json_or_empty()
 
     info!(%interest, "starting criteria_from_interest test");
 
-    let result =
-        feed::workers::update_user_interest_metadata::verify_from_interest(pool, db, interest)
-            .await;
+    let result = feed::workers::update_user_interest_metadata::verify_from_interest(
+        pool,
+        db,
+        interest,
+        "WisModel-20250821-8B-strict".to_string(),
+    )
+    .await;
     assert!(result.is_ok(), "criteria_from_interest should not error");
     let verify = result.unwrap();
     info!(?verify, "verify returned");
