@@ -18,18 +18,6 @@ use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use utoipa::ToSchema;
 
-// #[derive(Debug, Deserialize, ToSchema)]
-// pub struct AllVerifiedPapersRequest {
-//     #[serde(flatten)]
-//     pub pagination: Page,
-//     pub channel: Option<String>,
-//     pub matches: Option<Vec<VerificationMatch>>,
-//     pub user_interest_ids: Option<Vec<i64>>,
-//     pub time_range: Option<TimeRangeParam>,
-//     pub ignore_time_range: Option<bool>,
-//     pub keyword: Option<String>,
-// }
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PapersRequest {
     /// Page number for pagination (optional)
