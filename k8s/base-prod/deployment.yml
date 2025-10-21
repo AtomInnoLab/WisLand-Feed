@@ -23,22 +23,12 @@ spec:
         app: wisland-feed-prod
         version: v1
     spec:
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - wisland-feed-prod
-              topologyKey: topology.kubernetes.io/zone
       containers:
         - env:
             - name: aliyun_logs_wisland-feed-server-prod
               value: stdout
           image: >-
-            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20251020175526
+            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20251021093417
           imagePullPolicy: IfNotPresent
           livenessProbe:
             failureThreshold: 3
@@ -77,7 +67,7 @@ spec:
             - name: aliyun_logs_wisland-feed-worker-prod
               value: stdout
           image: >-
-            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20251020175526
+            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20251021093417
           imagePullPolicy: IfNotPresent
           name: wisland-feed-prod-worker
           resources:
@@ -100,6 +90,18 @@ spec:
       schedulerName: default-scheduler
       securityContext: {}
       terminationGracePeriodSeconds: 120
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - wisland-feed-prod
+              topologyKey: kubernetes.io/hostname
       tolerations:
         - effect: NoSchedule
           key: virtual-kubelet.io/provider
