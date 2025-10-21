@@ -6,24 +6,35 @@ metadata:
     alb.ingress.kubernetes.io/canary-by-header: X-Canary
     alb.ingress.kubernetes.io/canary-by-header-value: grey
     alb.ingress.kubernetes.io/order: '1'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},{"HTTPS": 443}]'
   labels:
     ingress-controller: alb
-  name: nginx-model-prod-ingress-canary
+  name: wisland-feed-prod-ingress-canary
   namespace: prod-ns
 spec:
   ingressClassName: alb
   rules:
-    - host: prod-nginx-model.dev.atominnolab.com
+    - host: wisland-feed.wispaper.inner
       http:
         paths:
           - backend:
               service:
-                name: nginx-model-prod-service-canary
+                name: wisland-feed-prod-service-canary
                 port:
-                  number: 80
+                  number: 3500
             path: /
             pathType: Prefix
+    - host: wisland-feed-canary.atominnolab.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: wisland-feed-prod-service-canary
+                port:
+                  number: 3500
+            path: /
+            pathType: Prefix      
   tls:
     - hosts:
-        - prod-nginx-model.dev.atominnolab.com
-      secretName: tls-dev.atominnolab.com
+        - wisland-feed-canary.atominnolab.com
+      secretName: tls-atominnolab.com

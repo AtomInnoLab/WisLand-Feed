@@ -2,54 +2,77 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: prod-ns
-  name: nginx-model-prod-canary
+  name: wisland-feed-prod-canary
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: nginx-model-prod-canary
+      app: wisland-feed-prod-canary
       version: v2
   template:
     metadata:
       labels:
-        app: nginx-model-prod-canary
+        app: wisland-feed-prod-canary
         version: v2
     spec:
       containers:
-        - name: nginx-model-prod-canary
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/nginx-model-prod:20250920142148
+        - name: wisland-feed-prod-canary-server
+          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20250920142148
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 80
+            - containerPort: 3500
               protocol: TCP
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-prod
+              subPath: .env
           resources:
             limits:
-              cpu: '0.25m'
-              memory: 0.5Gi
+              cpu: '0.5'
+              memory: 1Gi
             requests:
-              cpu: '0.25m'
-              memory: 0.5Gi
+              cpu: '0.5'
+              memory: 1Gi
           livenessProbe:
             tcpSocket:
-              port: 80
+              port: 3500
             initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 80
+              port: 3500
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
             successThreshold: 1
             failureThreshold: 3
+        - name: wisland-feed-prod-canary-worker
+          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20250920142148
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-prod
+              subPath: .env
+          resources:
+            limits:
+              cpu: '0.5'
+              memory: 1Gi
+            requests:
+              cpu: '0.5'
+              memory: 1Gi
       dnsPolicy: ClusterFirst
       nodeSelector:
         type: virtual-kubelet
       restartPolicy: Always
       schedulerName: default-scheduler
       terminationGracePeriodSeconds: 120
+      volumes:
+            - name: volume-wisland-feed-prod
+              secret:
+                defaultMode: 420
+                secretName: wisland-feed-prod
       tolerations:
         - effect: NoSchedule
           key: virtual-kubelet.io/provider
