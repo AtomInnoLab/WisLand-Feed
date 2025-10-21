@@ -154,8 +154,9 @@ async fn test_single_user_verification_with_limits() -> Result<(), Box<dyn std::
         messages.clone(),
     ));
 
+    let mut pubsub_manager_clone = pubsub_manager.clone();
+    let mut pubsub_manager_clone1 = pubsub_manager.clone();
     // Start listener in background task (add_listener is a long-running loop)
-    let pubsub_manager_clone = pubsub_manager.clone();
     tokio::spawn(async move {
         pubsub_manager_clone.add_listener(handler).await;
     });
@@ -519,7 +520,7 @@ async fn test_single_user_verification_with_limits() -> Result<(), Box<dyn std::
     info!("=== Cleanup ===");
     let user_channel =
         RedisPubSubManager::build_user_channel(&config.rss.verify_papers_channel, test_user_id);
-    pubsub_manager.unsubscribe(&user_channel).await?;
+    pubsub_manager_clone1.unsubscribe(&user_channel).await?;
     let _ = verify_manager.finish_user_verify(test_user_id, false).await;
 
     info!("Test completed successfully!");
