@@ -709,12 +709,27 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
                 );
                 tracing::debug!("Raw message that failed to parse: {}", message);
                 // If parsing fails, forward anyway to maintain backward compatibility
-                if self.sender.send(message).is_err() {
-                    tracing::warn!(
-                        "Failed to send message to SSE stream for user {}",
-                        self.user_id
-                    );
+                match self.sender.send(message) {
+                    Ok(_) => {
+                        tracing::info!(
+                            "Successfully sent message to SSE stream for user {}",
+                            self.user_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to send message to SSE stream for user {}: {}",
+                            self.user_id,
+                            e
+                        );
+                    }
                 }
+                // if self.sender.send(message).is_err() {
+                //     tracing::warn!(
+                //         "Failed to send message to SSE stream for user {}",
+                //         self.user_id
+                //     );
+                // }
                 return;
             }
         };
@@ -792,7 +807,7 @@ impl Drop for ConnectionMonitor {
         );
 
         // Unsubscribe from Redis PubSub
-        let pubsub_manager = self.pubsub_manager.clone();
+        let mut pubsub_manager = self.pubsub_manager.clone();
         let channel = self.channel.clone();
         let user_id = self.user_id;
 
@@ -1015,7 +1030,7 @@ pub async fn stream_verify(
     ));
 
     // Start listener in separate task to avoid blocking
-    let pubsub_manager = state.redis.pubsub_manager.clone();
+    let mut pubsub_manager = state.redis.pubsub_manager.clone();
     tokio::spawn(async move {
         pubsub_manager.add_listener(handler).await;
     });
