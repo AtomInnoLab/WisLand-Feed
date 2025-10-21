@@ -60,6 +60,7 @@ url = ""
 pool_size = 16
 redis_key_default_expire = 600
 redis_prefix = "wisland-feed"
+apalis_redis_prefix = "wisland-feed-apalis"
 
 # Named workers mapping for easier .env override by name
 [rss.workers.verify_papers]
