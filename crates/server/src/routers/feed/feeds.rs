@@ -14,7 +14,6 @@ use feed::dispatch;
 use feed::redis::pubsub::RedisPubSubManager;
 use feed::redis::verify_job::{JobDetail, VerifyJob};
 use feed::redis::verify_manager::{UserVerifyInfo, VerifyManager};
-use feed::workers::update_user_interest_metadata::run_update_user_interest_metadata;
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use futures::stream::{self, Stream};
 use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
@@ -45,6 +44,7 @@ use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 use feed::workers::verify_user_scheduler::{VerifyResultWithStats, has_match_yes_in_results};
+use sea_orm::DatabaseConnection;
 
 #[derive(Debug, Deserialize, ToSchema, Clone, Copy)]
 pub struct TimeRangeParam {
@@ -130,7 +130,7 @@ pub struct DeletePapersRequest {
     pub ids: Vec<i32>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema, Clone)]
 pub struct StreamVerifyRequest {
     pub channel: Option<String>,
     pub max_match_limit_per_user: Option<i32>,
@@ -391,29 +391,6 @@ pub async fn all_verified_papers(
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}, payload: {:?}", user, payload);
 
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    if verify_manager.is_day_gap(user.id).await? {
-        RssSubscriptionsQuery::update_subscription_latest_paper_ids(
-            &state.conn,
-            user.id,
-            payload.channel.as_deref(),
-        )
-        .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
-    }
-
-    verify_manager.wait_user_lock(user.id).await?;
-
     // Parse comma-separated matches string to Vec<VerificationMatch>
     let parsed_matches: Option<Vec<VerificationMatch>> =
         payload.matches.as_ref().and_then(|matches_str| {
@@ -451,13 +428,20 @@ pub async fn all_verified_papers(
             }
         });
 
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+    let verify_at = verify_manager.get_verify_at(user.id).await?;
+
     // Process time range, if start time is not specified, set to today's midnight
     let time_range = payload.time_range.map(|tr| {
         let start = tr.start.unwrap_or_else(|| {
-            // Get today's midnight (convert local time to fixed offset time)
-            let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
             Local
-                .from_local_datetime(&today_start)
+                .from_local_datetime(&DateTime::from_timestamp(verify_at, 0).unwrap().naive_utc())
                 .unwrap()
                 .fixed_offset()
         });
@@ -674,6 +658,116 @@ pub async fn batch_delete(
     Ok(ApiResponse::data(affected))
 }
 
+// Stream state for SSE verification
+struct StreamState {
+    monitor: ConnectionMonitor,
+    receiver: broadcast::Receiver<String>,
+    verify_manager: VerifyManager,
+    is_completed: bool,
+    is_first_iteration: bool,
+    search_params: Option<std::sync::Arc<ListVerifiedParams>>,
+    conn: DatabaseConnection,
+    user_id: i64,
+}
+
+// Event builder functions
+fn build_ready_event(user_id: i64, verify_info: UserVerifyInfo) -> Result<Event, ApiError> {
+    let ready_event_data = serde_json::json!({
+        "type": "ready",
+        "user_id": user_id,
+        "verify_info": verify_info,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "status": "connected"
+    });
+
+    Ok(Event::default()
+        .event("ready")
+        .data(format!("data: {ready_event_data}")))
+}
+
+fn build_match_limit_event(user_id: i64, verify_info: &UserVerifyInfo) -> Result<Event, ApiError> {
+    let limit_event_data = serde_json::json!({
+        "type": "match_limit_reached",
+        "user_id": user_id,
+        "matched": verify_info.matched_count,
+        "max_limit": verify_info.max_match_limit,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "status": "limit_reached",
+    });
+
+    Ok(Event::default()
+        .event("match_limit_reached")
+        .data(format!("data: {limit_event_data}")))
+}
+
+fn build_completion_event(verify_info: UserVerifyInfo) -> Result<Event, ApiError> {
+    let completion_event_data = serde_json::json!({
+        "type": "verify_completed",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "verify_info": verify_info,
+        "status": "completed",
+        "is_completed": true,
+    });
+
+    Ok(Event::default()
+        .event("verify_completed")
+        .data(format!("data: {completion_event_data}")))
+}
+
+fn build_heartbeat_event(user_id: i64, verify_info: UserVerifyInfo) -> Result<Event, ApiError> {
+    let event_data = serde_json::json!({
+        "type": "heartbeat",
+        "user_id": user_id,
+        "verify_info": verify_info,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "status": "connected",
+        "is_completed": false,
+    });
+
+    Ok(Event::default()
+        .event("heartbeat")
+        .data(format!("data: {event_data}")))
+}
+
+fn build_verify_success_event(
+    result: VerifyResultWithStats,
+    statistics: Option<serde_json::Value>,
+) -> Result<Event, ApiError> {
+    let mut event_obj = serde_json::json!({
+        "type": "verify_paper_success",
+        "verification_details": result.verification_details,
+        "verify_info": result.user_verify_info,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "status": "connected",
+        "is_completed": false,
+    });
+
+    if let Some(stats) = statistics {
+        if let Some(map) = event_obj.as_object_mut() {
+            map.insert("statistics".to_string(), stats);
+        }
+    }
+
+    Ok(Event::default()
+        .event("verify_paper_success")
+        .data(format!("data: {event_obj}")))
+}
+
+// State check functions
+fn should_end_stream(state: &StreamState) -> bool {
+    !state.monitor.is_connected() || state.is_completed
+}
+
+fn is_match_limit_reached(verify_info: &UserVerifyInfo) -> bool {
+    verify_info.max_match_limit > 0 && verify_info.matched_count >= verify_info.max_match_limit
+}
+
+fn is_verification_completed(verify_info: &UserVerifyInfo) -> bool {
+    verify_info.total == 0
+        || (verify_info.success_count + verify_info.fail_count) >= verify_info.total
+        || (verify_info.processing_count + verify_info.pending_unverify_count) == 0
+}
+
 // SSE message handler for forwarding Redis PubSub messages to SSE stream
 struct SseMessageHandler {
     user_id: i64,
@@ -832,6 +926,258 @@ impl Drop for ConnectionMonitor {
     }
 }
 
+impl StreamState {
+    async fn next_event(mut self) -> Option<(Result<Event, ApiError>, StreamState)> {
+        // Check if connection is still active or already completed
+        if should_end_stream(&self) {
+            tracing::info!("Ending SSE stream for user: {}", self.user_id);
+            return None;
+        }
+
+        // Get verify info (used for both ready event and subsequent checks)
+        let verify_info = match self
+            .verify_manager
+            .get_user_unverified_info(self.user_id)
+            .await
+        {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::error!("Failed to get verify info: {}", e);
+                return None;
+            }
+        };
+
+        // Send ready event on first iteration
+        if self.is_first_iteration {
+            return self.handle_ready(verify_info).await;
+        }
+
+        // Check if match limit has been reached
+        if is_match_limit_reached(&verify_info) {
+            return self.handle_limit_reached(verify_info).await;
+        }
+
+        // Check if verification is completed
+        if is_verification_completed(&verify_info) {
+            return self.handle_completion(verify_info).await;
+        }
+
+        // Use tokio::select! to simultaneously listen to timer, Redis messages and shutdown signal
+        tokio::select! {
+            // Listen for shutdown signal
+            _ = signal::ctrl_c() => {
+                tracing::info!("SSE stream received shutdown signal for user: {}", self.user_id);
+                None
+            }
+            // Send heartbeat message periodically
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                self.handle_heartbeat().await
+            }
+            // Receive Redis PubSub messages
+            result = self.receiver.recv() => {
+                match result {
+                    Ok(message) => self.handle_redis_message(message).await,
+                    Err(_) => {
+                        tracing::warn!("Redis message receiver closed for user {}", self.user_id);
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    async fn handle_ready(
+        mut self,
+        verify_info: UserVerifyInfo,
+    ) -> Option<(Result<Event, ApiError>, StreamState)> {
+        tracing::info!("Sending ready event for user: {}", self.user_id);
+
+        let ready_event = build_ready_event(self.user_id, verify_info);
+        self.is_first_iteration = false;
+
+        Some((ready_event, self))
+    }
+
+    async fn handle_limit_reached(
+        mut self,
+        verify_info: UserVerifyInfo,
+    ) -> Option<(Result<Event, ApiError>, StreamState)> {
+        tracing::info!(
+            "Match limit reached for user {}: matched={}, max_limit={}. Sending match_limit_reached event and disconnecting SSE stream.",
+            self.user_id,
+            verify_info.matched_count,
+            verify_info.max_match_limit
+        );
+
+        let limit_event = build_match_limit_event(self.user_id, &verify_info);
+        self.is_completed = true;
+
+        Some((limit_event, self))
+    }
+
+    async fn handle_completion(
+        mut self,
+        verify_info: UserVerifyInfo,
+    ) -> Option<(Result<Event, ApiError>, StreamState)> {
+        tracing::info!(
+            "Verification completed for user {}, sending completion event",
+            self.user_id
+        );
+
+        let completion_event = build_completion_event(verify_info);
+        self.is_completed = true;
+
+        Some((completion_event, self))
+    }
+
+    async fn handle_heartbeat(self) -> Option<(Result<Event, ApiError>, StreamState)> {
+        // Get current verify info for heartbeat
+        let verify_info = match self
+            .verify_manager
+            .get_user_unverified_info(self.user_id)
+            .await
+        {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::error!("Failed to get verify info for heartbeat: {}", e);
+                return None;
+            }
+        };
+
+        let heartbeat_event = build_heartbeat_event(self.user_id, verify_info);
+        Some((heartbeat_event, self))
+    }
+
+    async fn handle_redis_message(
+        self,
+        message: String,
+    ) -> Option<(Result<Event, ApiError>, StreamState)> {
+        tracing::info!("Forwarding Redis message to SSE for user {}", self.user_id);
+
+        // Parse the message as VerifyResultWithStats
+        let result_with_stats: VerifyResultWithStats = match serde_json::from_str(&message) {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse message as VerifyResultWithStats: {}. Skipping message.",
+                    e
+                );
+                // Skip this message and continue to next iteration
+                return Some((
+                    Ok(Event::default().event("error").data(
+                        "data: {\"type\":\"error\",\"message\":\"Failed to parse message\"}",
+                    )),
+                    self,
+                ));
+            }
+        };
+
+        // Optionally compute statistics and embed into event payload
+        let mut statistics_json: Option<serde_json::Value> = None;
+        if let Some(sp) = self.search_params.clone() {
+            let params = (*sp).clone();
+            match UserPaperVerificationsQuery::get_verified_statistics_by_user(
+                &self.conn,
+                self.user_id,
+                params,
+            )
+            .await
+            {
+                Ok(stats) => {
+                    statistics_json =
+                        Some(serde_json::to_value(stats).unwrap_or_else(|_| serde_json::json!({})));
+                }
+                Err(e) => {
+                    tracing::warn!("failed to get verified statistics: {}", e);
+                }
+            }
+        }
+
+        let verify_success_event = build_verify_success_event(result_with_stats, statistics_json);
+        Some((verify_success_event, self))
+    }
+}
+
+// Initialize stream state
+async fn initialize_stream_state(
+    state: AppState,
+    user_id: i64,
+    payload: StreamVerifyRequest,
+) -> Result<StreamState, ApiError> {
+    let verify_papers_sub_channel = state.config.rss.verify_papers_channel.clone();
+
+    // Create connection monitor
+    let monitor = ConnectionMonitor::new(
+        user_id,
+        state.redis.pubsub_manager.clone(),
+        verify_papers_sub_channel.clone(),
+    );
+
+    // Create broadcast channel for Redis PubSub message forwarding
+    let (tx, rx) = broadcast::channel::<String>(100);
+
+    // Create message handler to forward Redis messages to SSE stream
+    let handler = Box::new(SseMessageHandler::new(
+        user_id,
+        verify_papers_sub_channel,
+        tx,
+    ));
+
+    // Start listener in separate task to avoid blocking
+    let mut pubsub_manager = state.redis.pubsub_manager.clone();
+    tokio::spawn(async move {
+        pubsub_manager.add_listener(handler).await;
+    });
+
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    // Capture needed vars for SSE closure
+    let search_params_for_sse = payload.search_params.clone().map(std::sync::Arc::new);
+    let conn_clone_for_sse = state.conn.clone();
+
+    Ok(StreamState {
+        monitor,
+        receiver: rx,
+        verify_manager,
+        is_completed: false,
+        is_first_iteration: true,
+        search_params: search_params_for_sse,
+        conn: conn_clone_for_sse,
+        user_id,
+    })
+}
+
+// Start verification task
+async fn start_verification_task(state: AppState, user_id: i64, payload: &StreamVerifyRequest) {
+    let verify_manager = VerifyManager::new(
+        state.redis.clone().pool,
+        state.conn.clone(),
+        state.config.rss.feed_redis.redis_prefix.clone(),
+        state.config.rss.feed_redis.redis_key_default_expire,
+    )
+    .await;
+
+    if let Err(e) = verify_manager
+        .append_user_to_verify_list(
+            user_id,
+            Some(state.config.rss.max_rss_paper as i32),
+            payload.channel.clone(),
+            payload
+                .max_match_limit_per_user
+                .unwrap_or(state.config.rss.max_match_limit_per_user as i32),
+        )
+        .await
+    {
+        tracing::error!("Failed to append user to verify list: {}", e);
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/stream-verify",
@@ -986,325 +1332,27 @@ pub async fn stream_verify(
 ) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>> {
     tracing::info!("SSE connection established for user: {}", user.id);
     let user_id = user.id;
-    let verify_papers_sub_channel = state.config.rss.verify_papers_channel.clone();
 
-    let result = run_update_user_interest_metadata(
-        Some(user_id.to_string()),
-        state.config.clone(),
-        state.conn.clone(),
-        state.redis.pool.clone(),
-        state.config.llm.model.to_string(),
-    )
-    .await;
-    if result.is_err() {
-        tracing::error!(
-            "Failed to update user interest metadata: {}",
-            result.err().unwrap()
-        );
-        // Return error stream
-        return Sse::new(Box::pin(stream::once(async {
-            Err(ApiError::CustomError {
-                message: "Failed to update user interest metadata".to_string(),
-                code: ApiCode::COMMON_FEED_ERROR,
-            })
-        })));
-    } else {
-        tracing::info!("Successfully updated user interest metadata");
-    }
-
-    // Create connection monitor, automatically triggers Drop when SSE stream ends
-    let monitor = ConnectionMonitor::new(
-        user_id,
-        state.redis.pubsub_manager.clone(),
-        verify_papers_sub_channel.clone(),
-    );
-
-    // Create broadcast channel for Redis PubSub message forwarding
-    let (tx, rx) = broadcast::channel::<String>(100);
-
-    // Create message handler to forward Redis messages to SSE stream
-    let handler = Box::new(SseMessageHandler::new(
-        user_id,
-        verify_papers_sub_channel,
-        tx,
-    ));
-
-    // Start listener in separate task to avoid blocking
-    let mut pubsub_manager = state.redis.pubsub_manager.clone();
-    tokio::spawn(async move {
-        pubsub_manager.add_listener(handler).await;
-    });
-
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    // Capture needed vars for SSE closure to avoid moving out of captured variables
-    let search_params_for_sse = payload.search_params.clone().map(std::sync::Arc::new);
-    let conn_clone_for_sse = state.conn.clone();
-
-    let stream = stream::unfold(
-        (
-            monitor,
-            rx,
-            verify_manager.clone(),
-            false, // Add completion flag
-            search_params_for_sse.clone(),
-            conn_clone_for_sse.clone(),
-        ),
-        move |(
-            monitor,
-            mut receiver,
-            verify_manager_clone,
-            mut is_completed,
-            search_params_for_sse,
-            conn_clone_for_sse,
-        )| async move {
-            // Check if connection is still active or already completed
-            if !monitor.is_connected() || is_completed {
-                tracing::info!("Ending SSE stream for user: {}", user_id);
-                return None;
-            }
-
-            // Check verification status before waiting
-            let verify_info = verify_manager_clone
-                .get_user_unverified_info(user_id)
-                .await
-                .unwrap();
-
-            // Check if match limit has been reached
-            if verify_info.max_match_limit > 0
-                && verify_info.matched_count >= verify_info.max_match_limit
-            {
-                tracing::info!(
-                    "Match limit reached for user {}: matched={}, max_limit={}. Sending match_limit_reached event and disconnecting SSE stream.",
-                    user_id,
-                    verify_info.matched_count,
-                    verify_info.max_match_limit
-                );
-
-                let limit_event_data = serde_json::json!({
-                    "type": "match_limit_reached",
-                    "user_id": user_id,
-                    "matched": verify_info.matched_count,
-                    "max_limit": verify_info.max_match_limit,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                    "status": "limit_reached",
-                });
-
-                let limit_event: Result<Event, ApiError> = Ok(Event::default()
-                    .event("match_limit_reached")
-                    .data(format!("data: {limit_event_data}")));
-
-                is_completed = true;
-                return Some((
-                    limit_event,
-                    (
-                        monitor,
-                        receiver,
-                        verify_manager_clone,
-                        is_completed,
-                        search_params_for_sse,
-                        conn_clone_for_sse,
-                    ),
-                ));
-            }
-
-            let verification_completed = verify_info.total == 0
-                || (verify_info.success_count + verify_info.fail_count) >= verify_info.total
-                || (verify_info.processing_count + verify_info.pending_unverify_count) == 0;
-
-            if verification_completed {
-                // If completed, send completion event and mark as completed
-                tracing::info!(
-                    "Verification completed for user {}, sending completion event",
-                    user_id
-                );
-
-                let completion_event_data = serde_json::json!({
-                    "type": "verify_completed",
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                    "verify_info": verify_info,
-                    "status": "completed",
-                    "is_completed": true,
-                });
-
-                let completion_event: Result<Event, ApiError> = Ok(Event::default()
-                    .event("verify_completed")
-                    .data(format!("data: {completion_event_data}")));
-
-                is_completed = true;
-                return Some((
-                    completion_event,
-                    (
-                        monitor,
-                        receiver,
-                        verify_manager_clone,
-                        is_completed,
-                        search_params_for_sse,
-                        conn_clone_for_sse,
-                    ),
-                ));
-            }
-
-            // Use tokio::select! to simultaneously listen to timer, Redis messages and shutdown signal
-            tokio::select! {
-                // Listen for shutdown signal
-                _ = signal::ctrl_c() => {
-                    tracing::info!("SSE stream received shutdown signal for user: {}", user_id);
-                    None
-                }
-                // Send heartbeat message periodically
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                    // Get current verify info for heartbeat
-                    let verify_info = match verify_manager_clone.get_user_unverified_info(user_id).await {
-                        Ok(info) => info,
-                        Err(e) => {
-                            tracing::error!("Failed to get verify info for heartbeat: {}", e);
-                            return None;
-                        }
-                    };
-
-                    // Send normal heartbeat (completion already checked before select)
-                    let event_data = serde_json::json!({
-                        "type": "heartbeat",
-                        "user_id": user_id,
-                        "verify_info": verify_info,
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                        "status": "connected",
-                        "is_completed": false,
-                    });
-
-                    let event: Result<Event, ApiError> = Ok(Event::default()
-                        .event("heartbeat")
-                        .data(format!("data: {event_data}")));
-
-                    Some((
-                        event,
-                        (
-                            monitor,
-                            receiver,
-                            verify_manager_clone,
-                            is_completed,
-                            search_params_for_sse,
-                            conn_clone_for_sse,
-                        ),
-                    ))
-                }
-                // Receive Redis PubSub messages
-                result = receiver.recv() => {
-                    match result {
-                        Ok(message) => {
-                            tracing::info!("Forwarding Redis message to SSE for user {}", user_id);
-
-                            // Parse the message as VerifyResultWithStats
-                            let result_with_stats: VerifyResultWithStats = match serde_json::from_str(&message) {
-                                Ok(value) => value,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to parse message as VerifyResultWithStats: {}. Skipping message.",
-                                        e
-                                    );
-                                    // Skip this message and continue to next iteration
-                                    return Some((
-                                        Ok(Event::default().event("error").data("data: {\"type\":\"error\",\"message\":\"Failed to parse message\"}")),
-                                        (
-                                            monitor,
-                                            receiver,
-                                            verify_manager_clone,
-                                            is_completed,
-                                            search_params_for_sse,
-                                            conn_clone_for_sse,
-                                        )
-                                    ));
-                                }
-                            };
-
-
-
-                            // Optionally compute statistics and embed into event payload
-                            let mut statistics_json: Option<serde_json::Value> = None;
-                            let sp = search_params_for_sse.clone();
-                            if let Some(sp) = sp {
-                                let params = (*sp).clone();
-                                match UserPaperVerificationsQuery::get_verified_statistics_by_user(
-                                    &conn_clone_for_sse,
-                                    user_id,
-                                    params,
-                                )
-                                .await
-                                {
-                                    Ok(stats) => {
-                                        statistics_json = Some(serde_json::to_value(stats).unwrap_or_else(|_| serde_json::json!({})));
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("failed to get verified statistics: {}", e);
-                                    }
-                                }
-                            }
-
-                            // Build verify_paper_success payload
-                            let mut event_obj = serde_json::json!({
-                                "type": "verify_paper_success",
-                                "verification_details": result_with_stats.verification_details,
-                                "verify_info": result_with_stats.user_verify_info,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                "status": "connected",
-                                "is_completed": false,
-                            });
-                            if let Some(stats) = statistics_json {
-                                if let Some(map) = event_obj.as_object_mut() {
-                                    map.insert("statistics".to_string(), stats);
-                                }
-                            }
-                            let event_data = event_obj;
-
-                            let event: Result<Event, ApiError> = Ok(Event::default()
-                                .event("verify_paper_success")
-                                .data(format!("data: {event_data}")));
-
-                            // Return the event (limit check will happen on next iteration)
-                            Some((
-                                event,
-                                (
-                                    monitor,
-                                    receiver,
-                                    verify_manager_clone,
-                                    is_completed,
-                                    search_params_for_sse,
-                                    conn_clone_for_sse,
-                                ),
-                            ))
-                        }
-                        Err(_) => {
-                            tracing::warn!("Redis message receiver closed for user {}", user_id);
-                            // End SSE stream (trigger Drop cleanup and unsubscribe), avoid infinite loop and blocking graceful shutdown
-                            None
-                        }
-                    }
-                }
-            }
-        },
-    );
-
-    if let Err(e) = verify_manager
-        .append_user_to_verify_list(
-            user_id,
-            Some(state.config.rss.max_rss_paper as i32),
-            payload.channel,
-            payload
-                .max_match_limit_per_user
-                .unwrap_or(state.config.rss.max_match_limit_per_user as i32),
-        )
-        .await
+    // Initialize stream state
+    let stream_state = match initialize_stream_state(state.clone(), user_id, payload.clone()).await
     {
-        tracing::error!("Failed to append user to verify list: {}", e);
-    }
+        Ok(state) => state,
+        Err(e) => {
+            // Return error stream
+            return Sse::new(Box::pin(stream::once(async { Err(e) })));
+        }
+    };
 
+    // Create stream
+    let stream = stream::unfold(
+        stream_state,
+        |state| async move { state.next_event().await },
+    );
+
+    // Start verification task
+    start_verification_task(state, user_id, &payload).await;
+
+    // Return SSE
     Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
 }

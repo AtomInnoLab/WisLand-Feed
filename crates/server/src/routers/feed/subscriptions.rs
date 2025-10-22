@@ -161,15 +161,15 @@ pub async fn batch_subscriptions(
     )
     .await;
 
-    verify_manager.finish_user_verify(user.id, true).await?;
+    verify_manager.reset_user_verify(user.id).await?;
 
-    // Update subscriptions with current paper IDs
-    RssSubscriptionsQuery::update_subscription_latest_paper_ids(&state.conn, user.id, None)
-        .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
+    // // Update subscriptions with current paper IDs
+    // RssSubscriptionsQuery::update_subscription_latest_paper_ids(&state.conn, user.id, None)
+    //     .await
+    //     .context(DbErrSnafu {
+    //         stage: "update-subscription-latest-paper-ids",
+    //         code: ApiCode::COMMON_DATABASE_ERROR,
+    //     })?;
 
     let ids = RssSubscriptionsQuery::replace_many(&state.conn, user.id, payload.source_ids)
         .await
