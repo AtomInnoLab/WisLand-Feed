@@ -1,7 +1,6 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use common::{error::api_error::*, prelude::ApiCode};
-use feed::redis::verify_manager::VerifyManager;
 use seaorm_db::{
     entities::feed::rss_subscriptions, query::feed::rss_subscriptions::RssSubscriptionsQuery,
 };
@@ -152,24 +151,6 @@ pub async fn batch_subscriptions(
             "empty source_ids: clear all subscriptions"
         );
     }
-
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    verify_manager.finish_user_verify(user.id, true).await?;
-
-    // Update subscriptions with current paper IDs
-    RssSubscriptionsQuery::update_subscription_latest_paper_ids(&state.conn, user.id, None)
-        .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
 
     let ids = RssSubscriptionsQuery::replace_many(&state.conn, user.id, payload.source_ids)
         .await

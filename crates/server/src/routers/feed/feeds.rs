@@ -12,14 +12,12 @@ use chrono::{DateTime, FixedOffset, Local, TimeZone};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
 use feed::redis::pubsub::RedisPubSubManager;
-use feed::redis::verify_job::{JobDetail, VerifyJob};
-use feed::redis::verify_manager::{UserVerifyInfo, VerifyManager};
-use feed::workers::update_user_interest_metadata::run_update_user_interest_metadata;
+use feed::services::{UserVerifyInfo, VerifyService};
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use futures::stream::{self, Stream};
-use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
+use seaorm_db::entities::feed::user_paper_verifications::VerificationMatch;
 use seaorm_db::query::feed::user_paper_verifications::{
-    ListVerifiedParams, MarkReadParams, UserPaperVerificationsQuery, VerifiedPaperItem,
+    ListVerifiedParams, MarkReadParams, PaperWithVerifications, UserPaperVerificationsQuery,
 };
 use seaorm_db::query::feed::utils::{
     UserUnverifiedPapers, count_user_unread_papers, get_user_unverified_papers_count_info,
@@ -44,7 +42,7 @@ use tokio::signal;
 use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
-use feed::workers::verify_user_scheduler::{VerifyResultWithStats, has_match_yes_in_results};
+use feed::workers::verify_user_scheduler::VerifyResultWithStats;
 
 #[derive(Debug, Deserialize, ToSchema, Clone, Copy)]
 pub struct TimeRangeParam {
@@ -71,9 +69,9 @@ pub struct AllVerifiedPapersRequest {
     pub channel: Option<String>,
     pub matches: Option<String>,
     pub user_interest_ids: Option<String>,
-    #[serde(flatten)]
-    pub time_range: Option<TimeRangeParam>,
-    pub ignore_time_range: Option<bool>,
+    // #[serde(flatten)]
+    // pub time_range: Option<TimeRangeParam>,
+    // pub ignore_time_range: Option<bool>,
     pub keyword: Option<String>,
     #[serde(default, deserialize_with = "de_opt_i32_from_any")]
     pub rss_source_id: Option<i32>,
@@ -107,15 +105,10 @@ pub struct AllVerifiedPapersParams {
 
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
 pub struct AllVerifiedPapersResponse {
-    pub verify_info: UserVerifyInfo,
     pub pagination: Pagination,
-    pub papers: Vec<VerifiedPaperItem>,
+    pub papers: Vec<PaperWithVerifications>,
     pub interest_map: HashMap<i64, String>,
     pub source_map: HashMap<i32, rss_sources::Model>,
-    pub user_interest_stats: HashMap<i64, u64>,
-    pub today_count: u64,
-    pub yesterday_count: u64,
-    pub older_than_three_days_count: u64,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -283,64 +276,6 @@ pub async fn verify(
 
 #[utoipa::path(
     get,
-    path = "/verify-status",
-    summary = "Get verification job status",
-    description = r#"
-Retrieve the current status and details of the user's paper verification job.
-
-## Overview
-This endpoint returns detailed information about an ongoing or completed verification job, including progress, counts, and any errors.
-
-## Parameters
-- `channel` (optional): Filter status by specific channel
-
-## Returns
-Returns a `JobDetail` object containing:
-- Job ID and status (pending, running, completed, failed)
-- Progress information (processed count, total count, percentage)
-- Success and failure counts
-- Token usage statistics
-- Error messages if any
-- Timestamps for job creation and updates
-
-Returns `null` if no verification job exists for the user.
-"#,
-    params(
-        ("channel" = Option<String>, Query, description = "Optional channel filter to get verification status for specific channel"),
-    ),
-    responses(
-        (status = 200, body = Option<JobDetail>, description = "Successfully retrieved verification job details, returns null if no job exists"),
-        (status = 401, description = "Unauthorized - valid authentication required"),
-        (status = 500, description = "Failed to retrieve verification status"),
-    ),
-    tag = FEED_TAG,
-)]
-pub async fn verify_detail(
-    Query(payload): Query<FeedRequest>,
-    State(state): State<AppState>,
-    User(user): User,
-) -> Result<ApiResponse<Option<JobDetail>>, ApiError> {
-    tracing::info!("verify papers status");
-    let job = VerifyJob::new(
-        state.redis.pool,
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        user.id,
-        payload.channel.as_deref(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    );
-    let detail = job
-        .get_job_detail()
-        .await
-        .map_err(|e| ApiError::CustomError {
-            message: format!("verify_papers-detail: {e}"),
-            code: ApiCode::COMMON_FEED_ERROR,
-        })?;
-
-    Ok(ApiResponse::data(detail))
-}
-
-#[utoipa::path(
-    get,
     path = "/all-verified-papers",
     summary = "Get all verified papers",
     description = r#"
@@ -391,28 +326,13 @@ pub async fn all_verified_papers(
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}, payload: {:?}", user, payload);
 
-    let verify_manager = VerifyManager::new(
+    let verify_service = VerifyService::new(
         state.redis.clone().pool,
         state.conn.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
         state.config.rss.feed_redis.redis_key_default_expire,
     )
     .await;
-
-    if verify_manager.is_day_gap(user.id).await? {
-        RssSubscriptionsQuery::update_subscription_latest_paper_ids(
-            &state.conn,
-            user.id,
-            payload.channel.as_deref(),
-        )
-        .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
-    }
-
-    verify_manager.wait_user_lock(user.id).await?;
 
     // Parse comma-separated matches string to Vec<VerificationMatch>
     let parsed_matches: Option<Vec<VerificationMatch>> =
@@ -451,19 +371,6 @@ pub async fn all_verified_papers(
             }
         });
 
-    // Process time range, if start time is not specified, set to today's midnight
-    let time_range = payload.time_range.map(|tr| {
-        let start = tr.start.unwrap_or_else(|| {
-            // Get today's midnight (convert local time to fixed offset time)
-            let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
-            Local
-                .from_local_datetime(&today_start)
-                .unwrap()
-                .fixed_offset()
-        });
-        (Some(start), tr.end)
-    });
-
     // Check if pagination should be ignored
     let use_pagination = !payload.ignore_pagination.unwrap_or(false);
 
@@ -482,15 +389,12 @@ pub async fn all_verified_papers(
         user.id,
         ListVerifiedParams {
             channel: payload.channel.clone(),
-            matches: parsed_matches,
             user_interest_ids: parsed_user_interest_ids,
-            time_range,
             offset, // 使用计算出的 offset
             limit,  // 使用计算出的 limit
-            ignore_time_range: payload.ignore_time_range,
             keyword: payload.keyword.clone(),
             rss_source_id: payload.rss_source_id,
-            filter_by_unverified_lasted_paper_id: Some(!payload.ignore_time_range.unwrap_or(false)),
+            ignore_pagination: payload.ignore_pagination,
         },
     )
     .await
@@ -534,22 +438,6 @@ pub async fn all_verified_papers(
     let source_map: HashMap<i32, rss_sources::Model> =
         sources.into_iter().map(|m| (m.id, m)).collect();
 
-    // 补充 interest_map 中存在但 user_interest_stats 中不存在的统计数据
-    let mut user_interest_stats = verified_papers.user_interest_stats;
-    for interest_id in interest_map.keys() {
-        user_interest_stats.entry(*interest_id).or_insert(0);
-    }
-
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    let verify_info = verify_manager.get_user_unverified_info(user.id).await?;
-
     Ok(ApiResponse::data(AllVerifiedPapersResponse {
         pagination: if use_pagination {
             Pagination {
@@ -570,11 +458,6 @@ pub async fn all_verified_papers(
         papers: verified_papers.items,
         interest_map,
         source_map,
-        verify_info,
-        user_interest_stats,
-        today_count: verified_papers.today_count,
-        yesterday_count: verified_papers.yesterday_count,
-        older_than_three_days_count: verified_papers.older_than_three_days_count,
     }))
 }
 
@@ -735,7 +618,6 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
         };
 
         // Check if verification_details exists and has at least one "yes" match
-        let has_yes_match = has_match_yes_in_results(&result_with_stats.verification_details);
 
         tracing::debug!(
             "Paper has {} verifications, has_yes_match: {}",
@@ -744,11 +626,11 @@ impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
                 .as_ref()
                 .map(|v| v.verifications.len())
                 .unwrap_or(0),
-            has_yes_match
+            result_with_stats.match_yes
         );
 
         // Only forward message if there is at least one "yes" match
-        if !has_yes_match {
+        if !result_with_stats.match_yes {
             tracing::info!(
                 "No 'yes' match found in verifications, skipping message for user {}",
                 self.user_id
@@ -988,30 +870,6 @@ pub async fn stream_verify(
     let user_id = user.id;
     let verify_papers_sub_channel = state.config.rss.verify_papers_channel.clone();
 
-    let result = run_update_user_interest_metadata(
-        Some(user_id.to_string()),
-        state.config.clone(),
-        state.conn.clone(),
-        state.redis.pool.clone(),
-        state.config.llm.model.to_string(),
-    )
-    .await;
-    if result.is_err() {
-        tracing::error!(
-            "Failed to update user interest metadata: {}",
-            result.err().unwrap()
-        );
-        // Return error stream
-        return Sse::new(Box::pin(stream::once(async {
-            Err(ApiError::CustomError {
-                message: "Failed to update user interest metadata".to_string(),
-                code: ApiCode::COMMON_FEED_ERROR,
-            })
-        })));
-    } else {
-        tracing::info!("Successfully updated user interest metadata");
-    }
-
     // Create connection monitor, automatically triggers Drop when SSE stream ends
     let monitor = ConnectionMonitor::new(
         user_id,
@@ -1035,7 +893,7 @@ pub async fn stream_verify(
         pubsub_manager.add_listener(handler).await;
     });
 
-    let verify_manager = VerifyManager::new(
+    let verify_service = VerifyService::new(
         state.redis.clone().pool,
         state.conn.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
@@ -1051,7 +909,7 @@ pub async fn stream_verify(
         (
             monitor,
             rx,
-            verify_manager.clone(),
+            verify_service.clone(),
             false, // Add completion flag
             search_params_for_sse.clone(),
             conn_clone_for_sse.clone(),
@@ -1059,7 +917,7 @@ pub async fn stream_verify(
         move |(
             monitor,
             mut receiver,
-            verify_manager_clone,
+            verify_service_clone,
             mut is_completed,
             search_params_for_sse,
             conn_clone_for_sse,
@@ -1071,15 +929,20 @@ pub async fn stream_verify(
             }
 
             // Check verification status before waiting
-            let verify_info = verify_manager_clone
-                .get_user_unverified_info(user_id)
+            let verify_info = verify_service_clone
+                .get_user_verify_info(user_id)
                 .await
                 .unwrap();
 
+            let match_limit_reached = verify_service_clone
+                .is_match_limit_reached(user_id)
+                .await
+                .map_err(|e| ApiError::CustomError {
+                    message: format!("Failed to check match limit: {}", e),
+                    code: ApiCode::COMMON_FEED_ERROR,
+                });
             // Check if match limit has been reached
-            if verify_info.max_match_limit > 0
-                && verify_info.matched_count >= verify_info.max_match_limit
-            {
+            if let Ok(true) = match_limit_reached {
                 tracing::info!(
                     "Match limit reached for user {}: matched={}, max_limit={}. Sending match_limit_reached event and disconnecting SSE stream.",
                     user_id,
@@ -1106,7 +969,7 @@ pub async fn stream_verify(
                     (
                         monitor,
                         receiver,
-                        verify_manager_clone,
+                        verify_service_clone,
                         is_completed,
                         search_params_for_sse,
                         conn_clone_for_sse,
@@ -1114,11 +977,15 @@ pub async fn stream_verify(
                 ));
             }
 
-            let verification_completed = verify_info.total == 0
-                || (verify_info.success_count + verify_info.fail_count) >= verify_info.total
-                || (verify_info.processing_count + verify_info.pending_unverify_count) == 0;
+            let verification_completed = verify_service_clone
+                .is_task_completed(user_id)
+                .await
+                .map_err(|e| ApiError::CustomError {
+                    message: format!("Failed to check verification completion: {e}"),
+                    code: ApiCode::COMMON_FEED_ERROR,
+                });
 
-            if verification_completed {
+            if let Ok(true) = verification_completed {
                 // If completed, send completion event and mark as completed
                 tracing::info!(
                     "Verification completed for user {}, sending completion event",
@@ -1143,7 +1010,7 @@ pub async fn stream_verify(
                     (
                         monitor,
                         receiver,
-                        verify_manager_clone,
+                        verify_service_clone,
                         is_completed,
                         search_params_for_sse,
                         conn_clone_for_sse,
@@ -1161,7 +1028,7 @@ pub async fn stream_verify(
                 // Send heartbeat message periodically
                 _ = tokio::time::sleep(Duration::from_secs(1)) => {
                     // Get current verify info for heartbeat
-                    let verify_info = match verify_manager_clone.get_user_unverified_info(user_id).await {
+                    let verify_info = match verify_service_clone.get_user_verify_info(user_id).await {
                         Ok(info) => info,
                         Err(e) => {
                             tracing::error!("Failed to get verify info for heartbeat: {}", e);
@@ -1188,7 +1055,7 @@ pub async fn stream_verify(
                         (
                             monitor,
                             receiver,
-                            verify_manager_clone,
+                            verify_service_clone,
                             is_completed,
                             search_params_for_sse,
                             conn_clone_for_sse,
@@ -1215,7 +1082,7 @@ pub async fn stream_verify(
                                         (
                                             monitor,
                                             receiver,
-                                            verify_manager_clone,
+                                            verify_service_clone,
                                             is_completed,
                                             search_params_for_sse,
                                             conn_clone_for_sse,
@@ -1273,7 +1140,7 @@ pub async fn stream_verify(
                                 (
                                     monitor,
                                     receiver,
-                                    verify_manager_clone,
+                                    verify_service_clone,
                                     is_completed,
                                     search_params_for_sse,
                                     conn_clone_for_sse,
@@ -1291,7 +1158,7 @@ pub async fn stream_verify(
         },
     );
 
-    if let Err(e) = verify_manager
+    if let Err(e) = verify_service
         .append_user_to_verify_list(
             user_id,
             Some(state.config.rss.max_rss_paper as i32),
@@ -1373,7 +1240,7 @@ pub async fn all_users_verify_info(
     );
     tracing::info!("user id: {:?}", user);
 
-    let verify_manager = VerifyManager::new(
+    let verify_service = VerifyService::new(
         state.redis.clone().pool,
         state.conn.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
@@ -1382,14 +1249,14 @@ pub async fn all_users_verify_info(
     .await;
 
     // Get all user IDs from verify list
-    let user_ids = verify_manager.get_user_verify_list().await?;
+    let user_ids = verify_service.get_all_queued_users().await?;
 
     tracing::info!("Found {} users in verify list", user_ids.len());
 
     // Get verify info for each user
     let mut results = Vec::new();
     for user_id in user_ids {
-        match verify_manager.get_user_unverified_info(user_id).await {
+        match verify_service.get_user_verify_info(user_id).await {
             Ok(info) => {
                 // If this is the current user, include user info
                 let user_info = if user_id == user.id {

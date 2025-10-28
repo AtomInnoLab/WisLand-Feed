@@ -6,13 +6,17 @@ use crate::{
 };
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
-use feed::redis::verify_manager::VerifyManager;
-use seaorm_db::query::feed::rss_papers::{
-    GetUnverifiedPaperIdsParams, RssPaperDataWithDetail, RssPapersQuery,
+use feed::services::VerifyService;
+use seaorm_db::{
+    entities::feed::user_paper_verifications::VerificationMatch,
+    query::feed::rss_subscriptions::RssSubscriptionsQuery,
 };
 use seaorm_db::{
-    entities::feed::sea_orm_active_enums::VerificationMatch as VerificationMatchEnum,
-    query::feed::rss_subscriptions::RssSubscriptionsQuery,
+    entities::feed::{prelude::UserPaperVerifications, rss_papers},
+    query::feed::{
+        rss_papers::{GetUnverifiedPaperIdsParams, RssPaperDataWithDetail, RssPapersQuery},
+        user_paper_verifications::{ListUnverifiedParams, UserPaperVerificationsQuery},
+    },
 };
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -28,11 +32,11 @@ pub struct PapersRequest {
     pub keyword: Option<String>,
     pub rss_source_id: Option<i32>,
     #[serde(default = "default_verification_match")]
-    pub not_match: Option<VerificationMatchEnum>,
+    pub not_match: Option<VerificationMatch>,
 }
 
-fn default_verification_match() -> Option<VerificationMatchEnum> {
-    Some(VerificationMatchEnum::Yes)
+fn default_verification_match() -> Option<VerificationMatch> {
+    Some(VerificationMatch::Yes)
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -103,29 +107,6 @@ pub async fn unverified_papers(
 ) -> Result<ApiResponse<UnverifiedPapersResponse>, ApiError> {
     tracing::info!("get papers");
 
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    if verify_manager.is_day_gap(user.id).await? {
-        RssSubscriptionsQuery::update_subscription_latest_paper_ids(
-            &state.conn,
-            user.id,
-            payload.channel.as_deref(),
-        )
-        .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
-    }
-
-    verify_manager.wait_user_lock(user.id).await?;
-
     // Check if pagination parameters are provided
     let use_pagination = payload.page.is_some() || payload.page_size.is_some();
 
@@ -139,28 +120,23 @@ pub async fn unverified_papers(
         (None, None)
     };
 
-    let params = GetUnverifiedPaperIdsParams {
-        offset,
-        limit,
-        channel: payload.channel.clone(),
-        keyword: payload.keyword.clone(),
-        rss_source_id: payload.rss_source_id,
-        not_match: payload.not_match,
-    };
+    let unverified_result = UserPaperVerificationsQuery::list_unverified_papers(
+        &state.conn,
+        user.id,
+        ListUnverifiedParams {
+            offset,
+            limit,
+            channel: payload.channel.clone(),
+            keyword: payload.keyword.clone(),
+        },
+    )
+    .await
+    .context(DbErrSnafu {
+        stage: "list-unverified-papers",
+        code: ApiCode::COMMON_DATABASE_ERROR,
+    })?;
 
-    let rss_papers = RssPapersQuery::get_unverified_papers(&state.conn, user.id, params.clone())
-        .await
-        .context(DbErrSnafu {
-            stage: "get-papers",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
-
-    let total = RssPapersQuery::count_unverified_papers(&state.conn, user.id, params)
-        .await
-        .context(DbErrSnafu {
-            stage: "count-papers",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
+    let (rss_papers, total) = (unverified_result.items, unverified_result.total);
 
     // Set response based on whether pagination is used
     let pagination = if use_pagination {

@@ -54,6 +54,7 @@ arxiv_header_image = "https://info.arxiv.org/brand/images/brand-logo-primary.jpg
 raw_data_upload_dir = "data"
 verify_papers_channel = "verify_papers"
 verify_user_sorted_set = "verify_user_sorted_set"
+feed_origin_query = "Search for papers that meet the following criteria:"
 
 [rss.feed_redis]
 url = ""
@@ -109,6 +110,11 @@ concurrency = 2
 timeout_secs = 600
 retry = 1
 
+[rss.workers.update_user_interests]
+name = "update_user_interests"
+concurrency = 2
+timeout_secs = 600
+retry = 1
 
 [rss.workers.download_rss_source_files]
 name = "download_rss_source_files"

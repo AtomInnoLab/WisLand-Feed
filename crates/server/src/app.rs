@@ -1,7 +1,7 @@
 use crate::{
     middlewares::*,
     routers::{
-        feed::{self},
+        // feed::{self},
         health::{self, handler_404},
     },
     state::app_state::AppState,
@@ -40,7 +40,7 @@ pub async fn build_app() -> Result<(Router, AppState), ApiError> {
     let url_prefix = config.server.api_prefix.trim_end_matches('/');
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest(url_prefix, health::health_routers())
-        .nest(url_prefix, feed::feed_routers())
+        // .nest(url_prefix, feed::feed_routers())
         .split_for_parts();
 
     // build the final router with Swagger UI and Scalar documentation
