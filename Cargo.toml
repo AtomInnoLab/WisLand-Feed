@@ -77,12 +77,12 @@ quick-xml = { version = "0.38", features = ["serialize"] }
 dotenvy = "0.15.7"
 
 
-# 开发环境：使用 patch 覆盖为本地路径（URL 必须完全匹配！）
-[patch.'ssh://git@github.com/AtomInnoLab/WisAgent.git']
-conf = { path = "../WisAgent/crates/conf" }
-common = { path = "../WisAgent/crates/common" }
-search = { path = "../WisAgent/crates/search" }
-protocol = { path = "../WisAgent/crates/protocol" }
-seaorm-db = { path = "../WisAgent/crates/seaorm-db" }
-feed = { path = "../WisAgent/crates/feed" }
-oss = { path = "../WisAgent/crates/oss" }
+# # 开发环境：使用 patch 覆盖为本地路径（URL 必须完全匹配！）
+# [patch.'ssh://git@github.com/AtomInnoLab/WisAgent.git']
+# conf = { path = "../WisAgent/crates/conf" }
+# common = { path = "../WisAgent/crates/common" }
+# search = { path = "../WisAgent/crates/search" }
+# protocol = { path = "../WisAgent/crates/protocol" }
+# seaorm-db = { path = "../WisAgent/crates/seaorm-db" }
+# feed = { path = "../WisAgent/crates/feed" }
+# oss = { path = "../WisAgent/crates/oss" }
