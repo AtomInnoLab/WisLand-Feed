@@ -24,7 +24,6 @@ pub fn feed_routers() -> OpenApiRouter<AppState> {
         .routes(routes!(interests::interests))
         .routes(routes!(interests::set_interests))
         .routes(routes!(feeds::verify))
-        .routes(routes!(feeds::verify_detail))
         .routes(routes!(feeds::all_verified_papers))
         .routes(routes!(feeds::papers_make_read))
         .routes(routes!(feeds::unverified_count_info))
