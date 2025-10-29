@@ -59,7 +59,7 @@ feed_origin_query = "Search for papers that meet the following criteria:"
 [rss.feed_redis]
 url = ""
 pool_size = 16
-redis_key_default_expire = 600
+redis_key_default_expire = 1800
 redis_prefix = "wisland-feed"
 apalis_redis_prefix = "wisland-feed-apalis"
 
@@ -110,11 +110,12 @@ concurrency = 2
 timeout_secs = 600
 retry = 1
 
-[rss.workers.update_user_interests]
-name = "update_user_interests"
-concurrency = 2
+[rss.workers.update_task]
+name = "update_task"
+concurrency = 10
 timeout_secs = 600
 retry = 1
+
 
 [rss.workers.download_rss_source_files]
 name = "download_rss_source_files"
