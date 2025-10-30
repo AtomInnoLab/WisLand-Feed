@@ -1,7 +1,5 @@
 name: deploy_ali_ack-pre
 on:
-  push:
-    branches: [pre]
   pull_request_target:
     branches: [pre]
     types: [closed]
