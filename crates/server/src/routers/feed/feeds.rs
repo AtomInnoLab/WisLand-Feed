@@ -343,7 +343,7 @@ pub async fn verify(
 Retrieve a paginated or complete list of all verified papers for the authenticated user.
 
 ## Overview
-This endpoint returns papers that have been verified against the user's interests, with various filtering and pagination options. The response includes comprehensive metadata including paper details, verification results, interest mappings, and source information.
+This endpoint returns papers that have been verified against the user's interests, with various filtering and pagination options. **Only papers with verification match='Yes' are returned** (this is hardcoded in the query logic). The response includes comprehensive metadata including paper details, verification results, interest mappings, and source information.
 
 ## Query Parameters
 
@@ -359,7 +359,7 @@ This endpoint returns papers that have been verified against the user's interest
 
 ### Filtering Parameters
 - `channel` (optional): Filter by specific channel name (e.g., "arxiv", "default"). Only returns papers from matching channel.
-- `user_interest_ids` (optional): Filter by specific interest IDs as comma-separated string (e.g., "1,2,3,4").
+- `user_interest_ids` (optional): Filter by specific interest IDs as comma-separated string (e.g., "1,2,3,4"). The filtering is applied at the database level.
   - Empty string or spaces are ignored (same as not providing the parameter)
   - Only returns papers that match at least one of the specified interests
 - `keyword` (optional): Search keyword to filter papers by title or content. Performs substring matching.
@@ -389,8 +389,10 @@ When `ignore_pagination=true`:
 ### Papers Array
 Array of `PaperWithVerifications` objects, each containing:
 - Paper metadata: id, title, link, description, author, pub_date, etc.
-- Verification results for each matching interest
+- Verification results for each matching interest (only match='Yes' verifications are included)
 - Status indicators and metadata
+
+**Important**: Only papers with at least one verification record where `match='Yes'` are returned. Papers with only 'No' or 'Partial' matches are excluded.
 
 ### Interest Map
 - `HashMap<i64, String>`: Mapping of interest IDs to interest names
@@ -904,7 +906,7 @@ pub async fn batch_delete(
 Establish a Server-Sent Events (SSE) connection to receive real-time updates during paper verification.
 
 ## Overview
-This endpoint creates a persistent SSE connection that streams verification progress updates to the client in real-time. It's useful for showing live progress in the UI.
+This endpoint creates a persistent SSE connection that streams verification progress updates to the client in real-time. It automatically adds the user to the verification queue via `append_user_to_verify_list`, which triggers the background worker to start processing unverified papers. The connection subscribes to Redis pub/sub channels to forward verification events as they occur.
 
 ## Request Body
 
@@ -918,136 +920,47 @@ This endpoint creates a persistent SSE connection that streams verification prog
 
 ### Parameters
 - `channel` (optional): Channel to filter papers for verification. When provided, only papers from this channel will be verified.
-- `max_match_limit_per_user` (optional): Maximum number of matched papers per user. Defaults to system configuration value (`max_match_limit_per_user`). When the matched paper count reaches this limit:
-  - A `match_limit_reached` event is sent
-  - The SSE connection is automatically closed
-  - Further processing stops to prevent exceeding limits
-- `search_params` (optional): Advanced filtering parameters for papers to include in verification. When `null` or not provided, all unverified papers are included. Structure:
+- `max_match_limit_per_user` (optional): Maximum number of matched papers per user. Defaults to system configuration value. When the matched paper count reaches this limit, a `match_limit_reached` event is sent and the connection is closed.
+- `search_params` (optional): Advanced filtering parameters for papers to include in verification. When provided, the `verify_paper_success` events will include a `statistics` field with filtered statistics. Structure:
   ```json
   {
     "user_interest_ids": [1, 2, 3],
     "keyword": "machine learning",
     "rss_source_id": 42,
-    "offset": null,
-    "limit": null,
     "channel": "arxiv",
     "ignore_pagination": true
   }
   ```
 
 ## SSE Event Types
-The stream emits the following event types:
 
-1. **heartbeat**: Periodic status updates every 5 seconds
-   - Contains: user_id, verify_info, timestamp, status, is_completed
-   
-2. **verify_paper_success**: Sent when a paper is successfully verified (only for papers with at least one "Yes" match)
-   - Contains: verification_details (paper info and verification results), user_verify_info (user statistics), timestamp, status
-   
-3. **verify_completed**: Sent when all papers have been verified
-   - Contains: timestamp, status, is_completed flag
-   - The connection will be closed after sending this event
+1. **ready**: Initial event sent when verification task is ready to start
+   - Contains: user_id, verify_info, timestamp, status
 
-4. **match_limit_reached**: Sent when the matched paper count reaches the maximum limit
+2. **processing**: Sent when verification task starts processing
+   - Contains: user_id, verify_info, timestamp, status
+
+3. **heartbeat**: Periodic status updates every 1 second
+   - Contains: user_id, verify_info (optional), timestamp, status, is_completed
+
+4. **verify_paper_success**: Sent when a paper is successfully verified
+   - Contains: verification_details (paper info and verification results), verify_info (user statistics), timestamp, status
+   - If `search_params` was provided, also includes a `statistics` field with filtered verification statistics
+
+5. **verify_completed**: Sent when all papers have been verified
+   - Contains: verify_info, timestamp, status, is_completed flag
+   - The connection closes after this event
+
+6. **match_limit_reached**: Sent when the matched paper count reaches the maximum limit
    - Contains: user_id, matched, max_limit, timestamp, status
-   - The connection will be closed after sending this event
-
-## Event Data Structure
-
-### heartbeat event
-```json
-{
-  "type": "heartbeat",
-  "user_id": 123,
-  "verify_info": {
-    "pending_unverify_count": 10,
-    "success_count": 5,
-    "fail_count": 1,
-    "processing_count": 2,
-    "total": 18,
-    "token_usage": 1500,
-    "matched_count": 8,
-    "max_match_limit": 50,
-    "total_matched_count": 8
-  },
-  "timestamp": "2024-01-01T12:00:00Z",
-  "status": "connected",
-  "is_completed": false
-}
-```
-
-### verify_paper_success event
-```json
-{
-  "type": "verify_paper_success",
-  "verification_details": {
-    "paper": {
-      "id": 456,
-      "title": "Example Paper Title",
-      "arxiv_id": "2401.12345",
-      "abstract": "Paper abstract...",
-      "published_at": "2024-01-01T00:00:00Z",
-      // ... other paper fields
-    },
-    "verifications": [
-      {
-        "id": 789,
-        "user_id": 123,
-        "paper_id": 456,
-        "user_interest": {
-          "id": 1,
-          "interest": "Machine Learning",
-          // ... other interest fields
-        },
-        "match": "Yes",
-        "relevance_score": 0.95,
-        "verified_at": "2024-01-01T12:00:00Z",
-        "channel": "arxiv",
-        "metadata": null,
-        "unread": true,
-        "created_at": "2024-01-01T12:00:00Z",
-        "updated_at": "2024-01-01T12:00:00Z"
-      }
-    ]
-  },
-  "user_verify_info": {
-    "pending_unverify_count": 9,
-    "success_count": 6,
-    "fail_count": 1,
-    "processing_count": 2,
-    "total": 18,
-    "token_usage": 1600,
-    "matched_count": 9,
-    "max_match_limit": 50,
-    "total_matched_count": 9
-  },
-  "timestamp": "2024-01-01T12:00:00Z",
-  "status": "connected",
-  "is_completed": false
-}
-```
-
-### match_limit_reached event
-```json
-{
-  "type": "match_limit_reached",
-  "user_id": 123,
-  "matched": 50,
-  "max_limit": 50,
-  "timestamp": "2024-01-01T12:05:00Z",
-  "status": "limit_reached"
-}
-```
+   - The connection closes after this event
 
 ## Connection Management
-- Connection automatically updates user interest metadata before starting
+- Automatically adds user to verification list before starting (triggers background worker)
 - Subscribes to Redis pub/sub for real-time updates
 - Automatically unsubscribes and cleans up when connection is closed
 - Sends keep-alive messages every 10 seconds
-- Only forwards papers with at least one "Yes" match
-- Monitors matched paper count and disconnects when reaching the specified limit (if provided)
-  - When matched_count >= max_match_limit_per_user, a `match_limit_reached` event is sent
-  - The connection is then closed to prevent further processing
+- Heartbeat events sent every 1 second with current verification status
 
 ## Note
 This is a long-lived connection. The client should be prepared to handle connection drops and reconnect if needed. The connection may be terminated early if the maximum match limit is reached.

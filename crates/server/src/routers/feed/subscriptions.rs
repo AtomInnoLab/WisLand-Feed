@@ -85,10 +85,10 @@ pub struct SubscriptionCreateOneRequest {
     path = "/subscriptions",
     summary = "Batch update RSS subscriptions",
     description = r#"
-Replace all user's RSS subscriptions with a new set of source IDs using advanced asynchronous processing with optimization for high-frequency updates.
+Batch update user's RSS subscriptions with a new set of source IDs using incremental update logic and advanced asynchronous processing with optimization for high-frequency updates.
 
 ## Overview
-This endpoint allows users to batch update their RSS subscriptions. The system uses these subscriptions to control which RSS sources deliver papers to the user. The update is processed asynchronously with a delayed execution mechanism.
+This endpoint allows users to batch update their RSS subscriptions. The system uses these subscriptions to control which RSS sources deliver papers to the user. The update is processed asynchronously with a delayed execution mechanism using incremental update logic.
 
 ## Request Body
 ```json
@@ -109,12 +109,13 @@ This endpoint uses a sophisticated delayed execution mechanism:
 - **Latest-Wins Strategy**: Only the most recent request per user is executed
 - **Auto-Cancel**: Older requests are automatically cancelled if a new request arrives within the delay period
 
-### Complete Replacement Strategy
-The update performs a complete replacement operation:
-- **All existing subscriptions** for the user are removed first
-- **New subscriptions** are created for all provided source IDs
+### Incremental Update Strategy
+The update performs set-based incremental operations (not a complete replacement):
+- **Intersection (A∩B)**: Existing subscriptions that appear in the new request are preserved. If they were previously soft-deleted, they are restored (soft-delete cleared).
+- **A-B (New subscriptions)**: Source IDs in the request that don't exist are created as new subscription records.
+- **B-A (Removed subscriptions)**: Existing subscriptions not in the new request are soft-deleted (not permanently removed).
 - **Duplicate source IDs** are automatically deduplicated
-- **Empty array** will unsubscribe from all sources
+- **Empty array** will soft-delete all subscriptions (unsubscribe from all sources)
 
 ### High-Frequency Optimization
 The system is optimized for rapid, repeated updates (e.g., user selecting multiple feeds):
@@ -140,16 +141,18 @@ Returns a request ID (UUID string) for tracking the asynchronous operation:
 ## Side Effects & Processing
 
 ### Database Operations (After 500ms Delay)
-1. **Remove all existing subscriptions** for the user
-2. **Create new subscriptions** for all source IDs in the request
-3. **Deduplicate source IDs** automatically
-4. **Empty array handling**: If `source_ids` is empty, all subscriptions are removed
+1. **Restore soft-deleted subscriptions** that match the request (intersection)
+2. **Create new subscriptions** for source IDs not already subscribed to (A-B)
+3. **Soft-delete subscriptions** not in the new request (B-A)
+4. **Deduplicate source IDs** automatically
+5. **Empty array handling**: If `source_ids` is empty, all subscriptions are soft-deleted
 
 ### Important Constraints
 - Only the **most recent request** per user will be executed
 - Older requests within the 500ms window are cancelled
 - Request ID is NOT correlated with database transaction ID
-- Empty array `[]` results in ALL subscriptions being removed
+- Empty array `[]` results in ALL subscriptions being soft-deleted (can be restored)
+- Removed subscriptions are **soft-deleted**, not permanently deleted
 
 ## Use Cases
 
@@ -197,15 +200,16 @@ User quickly selects/deselects multiple feeds in UI:
 - Previous 9 requests are automatically discarded
 - This is intentional behavior to optimize for UI interactions
 
-### Complete Replacement
-⚠️ **This is a complete replacement operation**:
-- All existing subscriptions are removed first
-- Then new subscriptions are created
-- This is NOT an append operation
+### Incremental Update
+⚠️ **This is an incremental update operation**:
+- Uses set-based operations (intersection, create, soft-delete)
+- Preserves existing subscriptions that match the request
+- Only creates new and removes missing subscriptions
+- Removed subscriptions are soft-deleted (can be restored)
 - Use `POST /subscriptions/one` to add a single subscription without affecting others
 
 ### Edge Cases
-- **Empty array**: All subscriptions removed
+- **Empty array**: All subscriptions soft-deleted (can be restored)
 - **Duplicate source IDs**: Automatically deduplicated
 - **Invalid source IDs**: May cause operation to fail at database level
 - **Very large arrays**: Performance may degrade with extremely large subscription lists
