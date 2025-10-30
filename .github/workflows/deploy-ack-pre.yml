@@ -1,5 +1,4 @@
 name: deploy_ali_ack-pre
-
 on:
   push:
     branches: [pre]
