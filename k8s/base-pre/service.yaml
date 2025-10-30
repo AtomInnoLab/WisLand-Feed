@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: pre
+  name: wisland-feed-pre-service
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: tcp3500
+      port: 3500
+      protocol: TCP
+      targetPort: 3500
+  selector:
+    app: wisland-feed-pre
+    version: v1
+  sessionAffinity: None
+  type: ClusterIP
