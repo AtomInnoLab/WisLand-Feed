@@ -534,35 +534,6 @@ pub async fn all_verified_papers(
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}, payload: {:?}", user, payload);
 
-    // let verify_service = VerifyService::new(
-    //     state.redis.clone().pool,
-    //     state.conn.clone(),
-    //     state.config.rss.feed_redis.redis_prefix.clone(),
-    //     state.config.rss.feed_redis.redis_key_default_expire,
-    // )
-    // .await;
-
-    // // Parse comma-separated matches string to Vec<VerificationMatch>
-    // let parsed_matches: Option<Vec<VerificationMatch>> =
-    //     payload.matches.as_ref().and_then(|matches_str| {
-    //         if matches_str.trim().is_empty() {
-    //             None
-    //         } else {
-    //             let matches: Result<Vec<VerificationMatch>, _> = matches_str
-    //                 .split(',')
-    //                 .map(|s| s.trim())
-    //                 .filter(|s| !s.is_empty())
-    //                 .map(|s| match s.to_lowercase().as_str() {
-    //                     "yes" => Ok(VerificationMatch::Yes),
-    //                     "no" => Ok(VerificationMatch::No),
-    //                     "partial" => Ok(VerificationMatch::Partial),
-    //                     _ => Err(format!("Invalid match value: {s}")),
-    //                 })
-    //                 .collect();
-    //             matches.ok()
-    //         }
-    //     });
-
     // Parse comma-separated user_interest_ids string to Vec<i64>
     let parsed_user_interest_ids: Option<Vec<i64>> =
         payload.user_interest_ids.as_ref().and_then(|ids_str| {
