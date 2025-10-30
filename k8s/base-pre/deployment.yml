@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wisland-feed-pre
+  namespace: pre
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: wisland-feed-pre
+      version: v1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: wisland-feed-pre
+        version: v1
+    spec:
+      containers:
+        - name: wisland-feed-pre-server
+          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/atom-pre/wisland-feed-pre:server-20250923133527
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3500
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 3500
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            successThreshold: 1
+            tcpSocket:
+              port: 3500
+            timeoutSeconds: 3
+          resources:
+            limits:
+              cpu: 0.5
+              memory: 1Gi
+            requests:
+              cpu: 0.5
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-pre
+              subPath: .env
+
+        - name: wisland-feed-pre-worker
+          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/atom-pre/wisland-feed-pre:worker-20250923133527
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: 0.5
+              memory: 1Gi
+            requests:
+              cpu: 0.5
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-pre
+              subPath: .env
+
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        type: virtual-kubelet
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 120
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - wisland-feed-pre
+            topologyKey: topology.kubernetes.io/zone
+      tolerations:
+        - effect: NoSchedule
+          key: virtual-kubelet.io/provider
+          operator: Exists
+      volumes:
+        - name: volume-wisland-feed-pre
+          secret:
+            defaultMode: 420
+            secretName: wisland-feed-pre
