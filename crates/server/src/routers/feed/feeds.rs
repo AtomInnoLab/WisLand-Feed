@@ -60,9 +60,9 @@ pub struct AllVerifiedPapersRequest {
     pub channel: Option<String>,
     pub matches: Option<String>,
     pub user_interest_ids: Option<String>,
-    // #[serde(flatten)]
-    // pub time_range: Option<TimeRangeParam>,
-    // pub ignore_time_range: Option<bool>,
+    #[serde(flatten)]
+    pub time_range: Option<TimeRangeParam>,
+    pub ignore_time_range: Option<bool>,
     pub keyword: Option<String>,
     #[serde(default, deserialize_with = "de_opt_i32_from_any")]
     pub rss_source_id: Option<i32>,
