@@ -67,7 +67,7 @@ Examples:
 - `channel` (optional): Filter papers by specific channel name (e.g., "arxiv", "default"). Only shows papers from matching channel.
 - `keyword` (optional): Search keyword to filter papers by title or content. Performs substring matching.
 - `rss_source_id` (optional): Filter papers by specific RSS source ID. Only shows papers from that exact source.
-- `not_match` (optional, default: `Some(VerificationMatch::Yes)`): Filter papers by verification match status. Currently defaults to "yes" but can be used to filter by match type.
+- `not_match` (optional, deprecated): ⚠️ **This parameter is currently not implemented**. It is defined in the request structure but not used in the query. The parameter has no effect on the results.
 
 ## Returns
 
@@ -210,7 +210,7 @@ Returns first 100 arxiv papers containing "machine learning".
 - Papers come from user's subscribed RSS sources only
 - Empty results don't necessarily mean no papers exist (may be filtered out)
 - Pagination defaults to ALL data if no params provided (use carefully for large datasets)
-- The `not_match` parameter behavior may vary and should be tested
+- ⚠️ **`not_match` parameter**: This parameter is defined but not implemented. It has no effect on query results.
 
 ## Related Endpoints
 - Use `GET /all-verified-papers` to see verified papers
