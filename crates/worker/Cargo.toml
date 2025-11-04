@@ -46,7 +46,7 @@ seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "d
 ] }
 search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",
-    "local",
+    "cloud",
 ] }
 protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",

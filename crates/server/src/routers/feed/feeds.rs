@@ -15,7 +15,7 @@ use feed::services::{ConnectionMonitor, SseMessageHandler, VerifyService, create
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
 use futures::stream::Stream;
 use seaorm_db::query::feed::user_paper_verifications::{
-    ListVerifiedParams, MarkReadParams, PaperWithVerifications, UserPaperVerificationsQuery,
+    ListVerifiedParams, MarkReadParams, PaperWithVerification, UserPaperVerificationsQuery,
 };
 use seaorm_db::query::feed::utils::{
     UserUnverifiedPapers, count_user_unread_papers, get_user_unverified_papers_count_info,
@@ -97,7 +97,7 @@ pub struct AllVerifiedPapersParams {
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
 pub struct AllVerifiedPapersResponse {
     pub pagination: Pagination,
-    pub papers: Vec<PaperWithVerifications>,
+    pub papers: Vec<PaperWithVerification>,
     pub interest_map: HashMap<i64, String>,
     pub source_map: HashMap<i32, rss_sources::Model>,
 }
