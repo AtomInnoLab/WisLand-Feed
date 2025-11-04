@@ -68,7 +68,7 @@ pub struct AllVerifiedPapersRequest {
     pub rss_source_id: Option<i32>,
 }
 
-/// OpenAPI params declaration: avoid type degradation to string caused by combination of `#[serde(flatten)]` and `IntoParams`
+/// params declaration: avoid type degradation to string caused by combination of `#[serde(flatten)]` and `IntoParams`
 #[derive(Debug, utoipa::IntoParams)]
 pub struct AllVerifiedPapersParams {
     /// Page number (starts from 1)
