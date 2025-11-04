@@ -119,6 +119,7 @@ pub struct StreamVerifyRequest {
     pub channel: Option<String>,
     pub max_match_limit_per_user: Option<i32>,
     pub search_params: Option<ListVerifiedParams>,
+    pub ignore_ready_event: Option<bool>,
 }
 
 #[utoipa::path(
@@ -885,7 +886,8 @@ This endpoint creates a persistent SSE connection that streams verification prog
 {
   "channel": "arxiv",
   "max_match_limit_per_user": 50,
-  "search_params": null
+  "search_params": null,
+  "ignore_ready_event": false
 }
 ```
 
@@ -902,6 +904,7 @@ This endpoint creates a persistent SSE connection that streams verification prog
     "ignore_pagination": true
   }
   ```
+- `ignore_ready_event` (optional): Whether to skip sending the initial `ready` event. Defaults to `false`. When set to `true`, the SSE stream will not send the `ready` event at the start of verification.
 
 ## SSE Event Types
 
@@ -1026,6 +1029,7 @@ pub async fn stream_verify(
         verify_service,
         search_params_for_sse,
         conn_clone_for_sse,
+        payload.ignore_ready_event.unwrap_or(false),
     );
 
     Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>)
