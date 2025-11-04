@@ -1021,7 +1021,6 @@ pub async fn stream_verify(
     let search_params_for_sse = payload.search_params.clone().map(std::sync::Arc::new);
     let conn_clone_for_sse = state.conn.clone();
 
-    // Use the new stream creation function from stream_verify module
     let stream = create_verify_stream(
         user_id,
         monitor,
