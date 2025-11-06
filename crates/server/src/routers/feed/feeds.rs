@@ -575,6 +575,8 @@ pub async fn all_verified_papers(
             keyword: payload.keyword.clone(),
             rss_source_id: payload.rss_source_id,
             ignore_pagination: payload.ignore_pagination,
+            show_deleted: payload.ignore_time_range,
+            ignore_time_range: payload.ignore_time_range,
         },
     )
     .await
