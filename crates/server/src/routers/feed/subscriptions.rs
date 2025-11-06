@@ -265,6 +265,10 @@ pub async fn batch_subscriptions(
         state.redis.pool.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
         state.config.rss.feed_redis.redis_key_default_expire,
+        state.conn.clone(),
+        state.redis.pubsub_manager.clone(),
+        state.config.rss.verify_papers_channel.clone(),
+        state.config.rss.update_task_merge_delay_ms.unwrap_or(500),
     );
 
     let request_id = manager

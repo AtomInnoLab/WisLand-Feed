@@ -57,6 +57,7 @@ raw_data_upload_dir = "data"
 verify_papers_channel = "verify_papers"
 verify_user_sorted_set = "verify_user_sorted_set"
 feed_origin_query = "Search for papers that meet the following criteria:"
+update_task_merge_delay_ms = 300
 
 [rss.feed_redis]
 url = ""
