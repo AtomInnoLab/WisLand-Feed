@@ -989,33 +989,29 @@ pub async fn stream_verify(
     )
     .await;
 
-    // Register user to verify list before starting stream
-    // If this fails, return error stream instead of silently continuing
-    if let Err(e) = verify_service
-        .append_user_to_verify_list(
-            user_id,
-            Some(state.config.rss.max_rss_paper as i32),
-            payload.channel.clone(),
-            payload
-                .max_match_limit_per_user
-                .unwrap_or(state.config.rss.max_match_limit_per_user as i32),
-        )
-        .await
-    {
-        tracing::error!("Failed to append user to verify list: {}", e);
-        // Return an SSE stream that immediately sends an error event and closes
-        let error_message = format!("Failed to start verification: {e}");
-        let error_stream = futures::stream::once(async move {
-            let error_event = Event::default().event("error").data(format!(
-                r#"data: {{"type":"error","message":"{error_message}"}}"#
-            ));
-            Ok::<Event, ApiError>(error_event)
-        });
-        return Sse::new(
-            Box::pin(error_stream) as Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>
-        )
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)));
-    }
+    let verify_service_for_append = verify_service.clone();
+    let append_user_id = user_id;
+    let append_limit = Some(state.config.rss.max_rss_paper as i32);
+    let append_channel = payload.channel.clone();
+    let append_max_limit = payload
+        .max_match_limit_per_user
+        .unwrap_or(state.config.rss.max_match_limit_per_user as i32);
+    let append_delay_ms = state.config.rss.update_task_merge_delay_ms.unwrap_or(500);
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(append_delay_ms)).await;
+        if let Err(e) = verify_service_for_append
+            .append_user_to_verify_list(
+                append_user_id,
+                append_limit,
+                append_channel,
+                append_max_limit,
+            )
+            .await
+        {
+            tracing::error!("Failed to append user to verify list: {}", e);
+        }
+    });
 
     // Capture needed vars for SSE closure to avoid moving out of captured variables
     let search_params_for_sse = payload.search_params.clone().map(std::sync::Arc::new);
