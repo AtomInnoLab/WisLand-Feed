@@ -5003,6 +5003,7 @@ dependencies = [
  "seaorm-db",
  "serde",
  "serde_json",
+ "serde_json5",
  "snafu",
  "textdistance",
  "tokio",
@@ -6610,6 +6611,7 @@ dependencies = [
  "md5",
  "mime_guess",
  "once_cell",
+ "percent-encoding",
  "reqwest",
  "rs-snowflake",
  "rust-embed",
@@ -6617,9 +6619,12 @@ dependencies = [
  "serde_json",
  "tokenizers",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]
