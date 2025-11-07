@@ -148,7 +148,7 @@ pub async fn rss(
 ) -> Result<ApiResponse<RssTreeVec>, ApiError> {
     tracing::info!("list rss sources");
 
-    let rss_sources = RssSourcesQuery::list_all(&state.conn)
+    let rss_sources = RssSourcesQuery::list_all(&state.conn, Some("arxiv"))
         .await
         .context(DbErrSnafu {
             stage: "list-rss-sources",
