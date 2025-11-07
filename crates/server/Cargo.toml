@@ -50,6 +50,7 @@ conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", 
 common = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev" }
 search = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",
+    "cloud",
 ] }
 protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "feed",
@@ -60,4 +61,5 @@ seaorm-db = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "d
 ] }
 feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
     "redis",
+    "cloud",
 ] }
