@@ -54,6 +54,7 @@ protocol = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "de
     "redis",
 ] }
 oss = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false }
+paper = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false }
 tempfile = "3.8"
 flate2 = "1.0"
 tar = "0.4"
