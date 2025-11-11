@@ -1,0 +1,14 @@
+name = "wisland-feed-pre"
+log = "debug,sqlx=off,h2=off,sea_orm=off,hyper_util=off"
+
+[database]
+url = "database url"
+
+[llm]
+endpoint = "http://dev-wismodel.dev.atominnolab.com/v1"
+model = "WisModel-20250906"
+api_key = "sk-GmE1ci8tMnVzuaOGsPSgLA"
+
+[agent_redis]
+url = "redis url"
+pool_size = 16

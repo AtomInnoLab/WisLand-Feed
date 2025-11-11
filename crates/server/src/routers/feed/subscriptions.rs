@@ -1,13 +1,16 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use common::{error::api_error::*, prelude::ApiCode};
-use feed::redis::verify_manager::VerifyManager;
+use feed::redis::update_task_manager::{
+    TaskType, UpdateTaskData, UpdateTaskInput, UpdateTaskManager,
+};
 use seaorm_db::{
     entities::feed::rss_subscriptions, query::feed::rss_subscriptions::RssSubscriptionsQuery,
 };
 use serde::Deserialize;
 use snafu::ResultExt;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::{
     middlewares::auth::User, model::base::ApiResponse, routers::feed::FEED_TAG,
@@ -82,10 +85,10 @@ pub struct SubscriptionCreateOneRequest {
     path = "/subscriptions",
     summary = "Batch update RSS subscriptions",
     description = r#"
-Replace all user's RSS subscriptions with a new set of source IDs.
+Batch update user's RSS subscriptions with a new set of source IDs using incremental update logic and advanced asynchronous processing with optimization for high-frequency updates.
 
 ## Overview
-This endpoint performs a complete replacement of the user's RSS subscriptions. All existing subscriptions are removed and replaced with the new list.
+This endpoint allows users to batch update their RSS subscriptions. The system uses these subscriptions to control which RSS sources deliver papers to the user. The update is processed asynchronously with a delayed execution mechanism using incremental update logic.
 
 ## Request Body
 ```json
@@ -94,48 +97,152 @@ This endpoint performs a complete replacement of the user's RSS subscriptions. A
 }
 ```
 
-## Parameters
-- `source_ids`: Array of RSS source IDs to subscribe to
+### Parameters
+- `source_ids` (required): Array of RSS source IDs to subscribe to. Empty array `[]` is allowed and will clear all subscriptions.
 
-## Behavior
-- **Replace Operation**: This is NOT an append operation
-- All existing subscriptions for the user are deleted first
-- New subscriptions are created for the provided source IDs
-- Duplicate source IDs are automatically deduplicated
-- Empty array `[]` will **unsubscribe from all sources**
+## Behavior & Update Logic
+
+### Asynchronous Processing with 500ms Delay
+This endpoint uses a sophisticated delayed execution mechanism:
+- **Request Queuing**: Requests are queued for processing
+- **500ms Delay**: There's a 500ms delay before actual database operations
+- **Latest-Wins Strategy**: Only the most recent request per user is executed
+- **Auto-Cancel**: Older requests are automatically cancelled if a new request arrives within the delay period
+
+### Incremental Update Strategy
+The update performs set-based incremental operations (not a complete replacement):
+- **Intersection (A∩B)**: Existing subscriptions that appear in the new request are preserved. If they were previously soft-deleted, they are restored (soft-delete cleared).
+- **A-B (New subscriptions)**: Source IDs in the request that don't exist are created as new subscription records.
+- **B-A (Removed subscriptions)**: Existing subscriptions not in the new request are soft-deleted (not permanently removed).
+- **Duplicate source IDs** are automatically deduplicated
+- **Empty array** will soft-delete all subscriptions (unsubscribe from all sources)
+
+### High-Frequency Optimization
+The system is optimized for rapid, repeated updates (e.g., user selecting multiple feeds):
+- Multiple requests within 500ms are automatically merged
+- Only the final state is applied to the database
+- Reduces database load and prevents race conditions
+- Makes the UI responsive to user interactions
 
 ## Returns
-Returns an array of subscription IDs (i64) for the newly created or existing subscription records.
+
+Returns a request ID (UUID string) for tracking the asynchronous operation:
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Important**: This does NOT mean the database update has completed. The actual update happens ~500ms later.
+
+## Side Effects & Processing
+
+### Database Operations (After 500ms Delay)
+1. **Restore soft-deleted subscriptions** that match the request (intersection)
+2. **Create new subscriptions** for source IDs not already subscribed to (A-B)
+3. **Soft-delete subscriptions** not in the new request (B-A)
+4. **Deduplicate source IDs** automatically
+5. **Empty array handling**: If `source_ids` is empty, all subscriptions are soft-deleted
+
+### Important Constraints
+- Only the **most recent request** per user will be executed
+- Older requests within the 500ms window are cancelled
+- Request ID is NOT correlated with database transaction ID
+- Empty array `[]` results in ALL subscriptions being soft-deleted (can be restored)
+- Removed subscriptions are **soft-deleted**, not permanently deleted
 
 ## Use Cases
-- Bulk subscription management
-- Import/export subscription lists
-- Subscription synchronization
-- Reset subscriptions to a new set
 
-## Important Notes
-- **This is a complete replacement operation**
-- Providing an empty array `[]` will clear all subscriptions
-- Invalid source IDs may cause the operation to fail
-- Operation is atomic - either all succeed or all fail
+### Initial Setup
+```json
+{
+  "source_ids": [1, 5, 12, 23]
+}
+```
+First-time user setting up RSS subscriptions.
 
-## Special Behavior
-When `source_ids` is empty:
-- Logs: "empty source_ids: clear all subscriptions"
-- All user's subscriptions will be removed
-- Returns an empty array
+### Updating Subscriptions
+```json
+{
+  "source_ids": [1, 5, 15, 20, 25]
+}
+```
+Replace existing subscriptions with a new set of sources.
+
+### Clearing All Subscriptions
+```json
+{
+  "source_ids": []
+}
+```
+Remove all subscriptions (unsubscribe from all sources).
+
+### Rapid Selection (High-Frequency Scenario)
+User quickly selects/deselects multiple feeds in UI:
+- System handles multiple rapid requests efficiently
+- Only applies final state after user stops interacting
+
+## Important Notes & Warnings
+
+### Asynchronous Nature
+⚠️ **This is an asynchronous operation**:
+- Returns immediately with request ID
+- Database update happens ~500ms later
+- Results not immediately available
+- Use eventual consistency expectations
+
+### Latest Request Only
+⚠️ **Only the most recent request is executed**:
+- If user sends 10 requests in rapid succession, only the last one matters
+- Previous 9 requests are automatically discarded
+- This is intentional behavior to optimize for UI interactions
+
+### Incremental Update
+⚠️ **This is an incremental update operation**:
+- Uses set-based operations (intersection, create, soft-delete)
+- Preserves existing subscriptions that match the request
+- Only creates new and removes missing subscriptions
+- Removed subscriptions are soft-deleted (can be restored)
+- Use `POST /subscriptions/one` to add a single subscription without affecting others
+
+### Edge Cases
+- **Empty array**: All subscriptions soft-deleted (can be restored)
+- **Duplicate source IDs**: Automatically deduplicated
+- **Invalid source IDs**: May cause operation to fail at database level
+- **Very large arrays**: Performance may degrade with extremely large subscription lists
+
+## Error Handling
+- **400 Error**: Invalid request format or validation failure
+- **401 Error**: Unauthorized - no valid authentication
+- **500 Error**: Failed to queue update request (Redis/queue issues)
+
+## Best Practices
+1. **Wait after submission**: Don't immediately query subscriptions (wait >500ms)
+2. **Single final submission**: Send one update with complete final list
+3. **Reasonable subscription count**: Keep number of subscriptions manageable
+4. **Check source validity**: Ensure source IDs exist before subscribing
+5. **Use single endpoint**: For adding one subscription, prefer `POST /subscriptions/one`
+
+## Performance Characteristics
+- **Latency**: ~500ms delay before database operations
+- **Throughput**: Optimized for high-frequency requests (UI interaction scenarios)
+- **Scaling**: Uses Redis queuing for distributed systems
 
 ## Related Endpoints
-- Use `GET /subscriptions` to view current subscriptions before updating
-- Use `POST /subscriptions/one` to add a single subscription without affecting others
-- Use `GET /rss` to browse available RSS sources
+- **`GET /subscriptions`**: Retrieve current active subscriptions
+- **`POST /subscriptions/one`**: Add a single subscription without affecting others
+- **`DELETE /subscriptions/{id}`**: Remove a specific subscription
+- **`GET /rss`**: Browse available RSS sources
 "#,
     request_body = SubscriptionsCreateRequest,
     responses(
-        (status = 200, description = "Successfully updated subscriptions, returns list of subscription IDs", body = Vec<i64>),
+        (status = 200, description = "Successfully queued subscriptions update, returns request ID for tracking", body = String),
         (status = 401, description = "Unauthorized - valid authentication required"),
-        (status = 400, description = "Invalid source IDs"),
-        (status = 500, description = "Database error or transaction failed"),
+        (status = 400, description = "Invalid request data"),
+        (status = 500, description = "Failed to queue update request"),
     ),
     tag = FEED_TAG,
 )]
@@ -143,9 +250,9 @@ pub async fn batch_subscriptions(
     State(state): State<AppState>,
     User(user): User,
     Json(payload): Json<SubscriptionsCreateRequest>,
-) -> Result<ApiResponse<Vec<i64>>, ApiError> {
+) -> Result<ApiResponse<String>, ApiError> {
     let count = payload.source_ids.len();
-    tracing::info!(user_id = user.id, count, "create subscriptions request");
+    tracing::info!(user_id = user.id, count, "set subscriptions (async)");
     if count == 0 {
         tracing::info!(
             user_id = user.id,
@@ -153,37 +260,43 @@ pub async fn batch_subscriptions(
         );
     }
 
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
+    // Create UpdateTaskManager
+    let manager = UpdateTaskManager::new(
+        state.redis.pool.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
         state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
+        state.conn.clone(),
+        state.redis.pubsub_manager.clone(),
+        state.config.rss.verify_papers_channel.clone(),
+        state.config.rss.update_task_merge_delay_ms.unwrap_or(500),
+    );
 
-    verify_manager.finish_user_verify(user.id, true).await?;
-
-    // Update subscriptions with current paper IDs
-    RssSubscriptionsQuery::update_subscription_latest_paper_ids(&state.conn, user.id, None)
+    let request_id = manager
+        .submit_update(
+            UpdateTaskInput {
+                task_type: TaskType::UserSubscriptions,
+                user_id: user.id,
+                data: UpdateTaskData::UserSubscriptions {
+                    source_ids: payload.source_ids,
+                },
+                request_id: Uuid::new_v4().to_string(),
+            },
+            state.redis.apalis_conn.clone(),
+        )
         .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
-
-    let ids = RssSubscriptionsQuery::replace_many(&state.conn, user.id, payload.source_ids)
-        .await
-        .context(DbErrSnafu {
-            stage: "create-rss-subscriptions",
-            code: ApiCode::COMMON_DATABASE_ERROR,
+        .map_err(|e| ApiError::CustomError {
+            message: format!("Failed to submit subscriptions update: {e}"),
+            code: ApiCode::COMMON_FEED_ERROR,
         })?;
 
     tracing::info!(
         user_id = user.id,
-        returned = ids.len(),
-        "create subscriptions done"
+        request_id = %request_id,
+        "Successfully queued subscriptions update"
     );
-    Ok(ApiResponse::data(ids))
+
+    // Return request_id immediately (do not wait for database operation)
+    Ok(ApiResponse::data(request_id))
 }
 
 #[utoipa::path(

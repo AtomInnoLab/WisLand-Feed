@@ -63,7 +63,7 @@ http = "1"
 # redis
 bb8 = "0.9"
 bb8-redis = "0.24"
-redis = { version = "0.32", features = ["bb8", "tokio-rustls-comp"] }
+redis = { version = "0.32", features = ["bb8", "tokio-rustls-comp", "streams"] }
 
 # misc
 itertools = "0.14"

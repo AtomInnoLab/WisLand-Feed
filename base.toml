@@ -41,6 +41,9 @@ access_key_secret = "access_key_secret"
 bucket = "bucket"
 endpoint = "endpoint"
 prefix = "prefix"
+sts_endpoint = ''
+arn = ''
+sts_expire_secs = 0
 
 [rss]
 max_prompt_number = 10
@@ -50,15 +53,19 @@ pdf_image_width = 2480
 pdf_image_height = 3508
 max_match_limit_per_user = 50
 user_max_concurrency_timeout_secs = 300
-arxiv_header_image = "https://info.arxiv.org/brand/images/brand-logo-primary.jpg"
+arxiv_header_image = "wisland-rss/logo/arxiv-logo.jpg"
+science_header_image = "wisland-rss/logo/science-logo.png"
+nature_header_image = "wisland-rss/logo/nature-logo.png"
 raw_data_upload_dir = "data"
 verify_papers_channel = "verify_papers"
 verify_user_sorted_set = "verify_user_sorted_set"
+feed_origin_query = "Search for papers that meet the following criteria:"
+update_task_merge_delay_ms = 300
 
 [rss.feed_redis]
 url = ""
 pool_size = 16
-redis_key_default_expire = 600
+redis_key_default_expire = 1800
 redis_prefix = "wisland-feed"
 apalis_redis_prefix = "wisland-feed-apalis"
 
@@ -106,6 +113,12 @@ cron = "@daily"
 [rss.workers.update_user_interest_metadata_once]
 name = "update_user_interest_metadata_once"
 concurrency = 2
+timeout_secs = 600
+retry = 1
+
+[rss.workers.update_task]
+name = "update_task"
+concurrency = 10
 timeout_secs = 600
 retry = 1
 

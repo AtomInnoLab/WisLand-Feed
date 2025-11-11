@@ -8,18 +8,14 @@ use crate::{
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use chrono::{DateTime, FixedOffset, Local, TimeZone};
+use chrono::{DateTime, FixedOffset};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
-use feed::redis::pubsub::RedisPubSubManager;
-use feed::redis::verify_job::{JobDetail, VerifyJob};
-use feed::redis::verify_manager::{UserVerifyInfo, VerifyManager};
-use feed::workers::update_user_interest_metadata::run_update_user_interest_metadata;
+use feed::services::{ConnectionMonitor, SseMessageHandler, VerifyService, create_verify_stream};
 use feed::workers::verify_user_papers::VerifyAllUserPapersInput;
-use futures::stream::{self, Stream};
-use seaorm_db::entities::feed::sea_orm_active_enums::VerificationMatch;
+use futures::stream::Stream;
 use seaorm_db::query::feed::user_paper_verifications::{
-    ListVerifiedParams, MarkReadParams, UserPaperVerificationsQuery, VerifiedPaperItem,
+    ListVerifiedParams, MarkReadParams, PaperWithVerification, UserPaperVerificationsQuery,
 };
 use seaorm_db::query::feed::utils::{
     UserUnverifiedPapers, count_user_unread_papers, get_user_unverified_papers_count_info,
@@ -35,16 +31,9 @@ use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 use std::time::Duration;
-use tokio::signal;
 use tokio::sync::broadcast;
 use utoipa::ToSchema;
-
-use feed::workers::verify_user_scheduler::{VerifyResultWithStats, has_match_yes_in_results};
 
 #[derive(Debug, Deserialize, ToSchema, Clone, Copy)]
 pub struct TimeRangeParam {
@@ -79,7 +68,7 @@ pub struct AllVerifiedPapersRequest {
     pub rss_source_id: Option<i32>,
 }
 
-/// OpenAPI 参数声明专用：避免 `#[serde(flatten)]` 与 `IntoParams` 组合导致的类型退化为 string
+/// params declaration: avoid type degradation to string caused by combination of `#[serde(flatten)]` and `IntoParams`
 #[derive(Debug, utoipa::IntoParams)]
 pub struct AllVerifiedPapersParams {
     /// Page number (starts from 1)
@@ -107,15 +96,10 @@ pub struct AllVerifiedPapersParams {
 
 #[derive(Debug, Deserialize, ToSchema, Serialize)]
 pub struct AllVerifiedPapersResponse {
-    pub verify_info: UserVerifyInfo,
     pub pagination: Pagination,
-    pub papers: Vec<VerifiedPaperItem>,
+    pub papers: Vec<PaperWithVerification>,
     pub interest_map: HashMap<i64, String>,
     pub source_map: HashMap<i32, rss_sources::Model>,
-    pub user_interest_stats: HashMap<i64, u64>,
-    pub today_count: u64,
-    pub yesterday_count: u64,
-    pub older_than_three_days_count: u64,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -135,6 +119,7 @@ pub struct StreamVerifyRequest {
     pub channel: Option<String>,
     pub max_match_limit_per_user: Option<i32>,
     pub search_params: Option<ListVerifiedParams>,
+    pub ignore_ready_event: Option<bool>,
 }
 
 #[utoipa::path(
@@ -225,29 +210,99 @@ pub async fn unread_count(
     path = "/verify",
     summary = "Trigger paper verification",
     description = r#"
-Initiate the verification process for user's papers against their interests.
+Initiate the asynchronous verification process for user's papers against their interests.
 
 ## Overview
-This endpoint triggers an asynchronous verification job that matches unverified papers from the user's RSS subscriptions against their defined interests. The verification process uses AI to determine relevance.
-
-## Process
-1. Creates a verification job and adds it to the queue
-2. Returns immediately with a success indicator
-3. Verification runs asynchronously in the background
-4. Progress can be tracked via the `/verify-status` endpoint
-
-## Parameters
-- `channel`: The channel to filter papers for verification
+This endpoint triggers an asynchronous verification job that matches unverified papers from the user's RSS subscriptions against their defined interests. The verification process uses AI to determine relevance by comparing paper content with user's interest keywords.
 
 ## Request Body
+
 ```json
 {
   "channel": "default"
 }
 ```
 
+### Parameters
+- `channel` (required): The channel to filter papers for verification. Only papers from RSS sources in this channel will be considered.
+
+## Process Flow
+1. **Immediate Response**: Returns `true` immediately upon successful job queuing
+2. **Background Processing**: Verification runs asynchronously via worker processes
+3. **AI Matching**: Each unverified paper is evaluated against all user interests using semantic similarity
+4. **Result Classification**: Papers are classified as "Yes" (relevant), "No" (not relevant), or "Partial" (somewhat relevant)
+5. **Status Updates**: Real-time progress available via `/stream-verify` SSE endpoint
+
+## Job Configuration
+The verification job uses system-configured limits:
+- `max_prompt_number`: Maximum number of prompts per batch
+- `max_rss_paper`: Maximum number of RSS papers to process per user
+
 ## Returns
-Returns `true` if the verification job was successfully queued.
+Returns `true` (wrapped in `ApiResponse<bool>`) if the verification job was successfully queued.
+
+**Response Structure:**
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": true
+}
+```
+
+## Asynchronous Behavior
+⚠️ **Important**: This is an asynchronous operation
+- Returns immediately after queuing the job
+- Actual verification happens in background worker processes
+- No progress is returned in the response
+- Use other endpoints to track progress and results
+
+## Progress Tracking
+After triggering verification, use these endpoints to track progress:
+
+1. **`POST /stream-verify`**: Real-time SSE stream with live updates
+   - Shows progress as papers are verified
+   - Provides verified paper details in real-time
+   - Best for showing live progress in UI
+
+2. **`GET /all-verified-papers`**: Retrieve verified papers
+   - Fetch all verified papers after completion
+   - Use after verification finishes
+
+3. **`GET /all-users-verify-info`**: Get verification statistics
+   - Shows pending, success, fail counts
+   - Useful for progress monitoring
+
+## Verification Logic
+- **Input**: Unverified papers from user's RSS subscriptions in the specified channel
+- **Processing**: Each paper is compared against ALL user interests using AI
+- **Output**: Verification records linking papers to interests with match scores
+- **Classification**: Each verification marked as "Yes", "No", or "Partial"
+
+## Error Scenarios
+- **500 Error**: Failed to queue verification job (Redis connection issue, queue full)
+- **401 Error**: Unauthorized - no valid authentication token
+- **Invalid channel**: Job may queue but process no papers if channel doesn't exist
+
+## Use Cases
+- Trigger verification after adding new RSS subscriptions
+- Re-verify papers after updating interests
+- Verify papers from a specific channel
+- Initial verification for new users
+- Batch process unverified papers
+
+## Important Notes
+- Multiple calls will create multiple jobs (they are additive, not replaced)
+- Verification can be time-consuming for users with many papers
+- Token usage counts toward API rate limits
+- Only processes papers from subscribed RSS sources
+- Uses the latest user interests for verification
+
+## Related Endpoints
+- **`POST /stream-verify`**: Stream verification progress in real-time
+- **`GET /all-verified-papers`**: Retrieve verified papers
+- **`GET /all-users-verify-info`**: Check verification statistics
+- **`GET /unverified-count-info`**: See how many papers await verification
 "#,
     request_body = VerifyRequest,
     responses(
@@ -283,95 +338,184 @@ pub async fn verify(
 
 #[utoipa::path(
     get,
-    path = "/verify-status",
-    summary = "Get verification job status",
-    description = r#"
-Retrieve the current status and details of the user's paper verification job.
-
-## Overview
-This endpoint returns detailed information about an ongoing or completed verification job, including progress, counts, and any errors.
-
-## Parameters
-- `channel` (optional): Filter status by specific channel
-
-## Returns
-Returns a `JobDetail` object containing:
-- Job ID and status (pending, running, completed, failed)
-- Progress information (processed count, total count, percentage)
-- Success and failure counts
-- Token usage statistics
-- Error messages if any
-- Timestamps for job creation and updates
-
-Returns `null` if no verification job exists for the user.
-"#,
-    params(
-        ("channel" = Option<String>, Query, description = "Optional channel filter to get verification status for specific channel"),
-    ),
-    responses(
-        (status = 200, body = Option<JobDetail>, description = "Successfully retrieved verification job details, returns null if no job exists"),
-        (status = 401, description = "Unauthorized - valid authentication required"),
-        (status = 500, description = "Failed to retrieve verification status"),
-    ),
-    tag = FEED_TAG,
-)]
-pub async fn verify_detail(
-    Query(payload): Query<FeedRequest>,
-    State(state): State<AppState>,
-    User(user): User,
-) -> Result<ApiResponse<Option<JobDetail>>, ApiError> {
-    tracing::info!("verify papers status");
-    let job = VerifyJob::new(
-        state.redis.pool,
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        user.id,
-        payload.channel.as_deref(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    );
-    let detail = job
-        .get_job_detail()
-        .await
-        .map_err(|e| ApiError::CustomError {
-            message: format!("verify_papers-detail: {e}"),
-            code: ApiCode::COMMON_FEED_ERROR,
-        })?;
-
-    Ok(ApiResponse::data(detail))
-}
-
-#[utoipa::path(
-    get,
     path = "/all-verified-papers",
     summary = "Get all verified papers",
     description = r#"
-Retrieve a paginated list of all verified papers for the authenticated user.
+Retrieve a paginated or complete list of all verified papers for the authenticated user.
 
 ## Overview
-This endpoint returns papers that have been verified against the user's interests, with various filtering and pagination options.
+This endpoint returns papers that have been verified against the user's interests, with various filtering and pagination options. **Only papers with verification match='Yes' are returned** (this is hardcoded in the query logic). The response includes comprehensive metadata including paper details, verification results, interest mappings, and source information.
 
 ## Query Parameters
-- `page`: Page number (starts from 1)
-- `page_size`: Number of items per page
-- `ignore_pagination` (optional): Whether to ignore pagination and return all data (defaults to false)
-- `channel` (optional): Filter by specific channel
-- `matches` (optional): Filter by verification match types as comma-separated string (e.g., "yes,no,partial")
-- `user_interest_ids` (optional): Filter by specific interest IDs as comma-separated string (e.g., "1,2,3,4")
-- `start` (optional): Start datetime for filtering papers
-- `end` (optional): End datetime for filtering papers
-- `ignore_time_range` (optional): Ignore time range filter
-- `keyword` (optional): Search keyword to filter papers by title or content
-- `rss_source_id` (optional): Filter papers by specific RSS source ID
+
+### Pagination Parameters
+- `page` (optional, default: 1): Page number for pagination. Starts from 1. Invalid or non-positive values default to 1.
+- `page_size` (optional, default: 20): Number of items per page. Invalid or non-positive values default to 20.
+- `ignore_pagination` (optional, default: false): When `true`, returns all data without pagination. When `false`, uses pagination with default values.
+
+**Pagination Behavior:**
+- If both `page` and `page_size` are not provided, defaults to `page=1, page_size=20`
+- If either parameter is invalid (non-positive), uses the default value
+- When `ignore_pagination=true`, returns ALL data and `pagination` info reflects the total dataset
+
+### Filtering Parameters
+- `channel` (optional): Filter by specific channel name (e.g., "arxiv", "default"). Only returns papers from matching channel.
+- `user_interest_ids` (optional): Filter by specific interest IDs as comma-separated string (e.g., "1,2,3,4"). The filtering is applied at the database level.
+  - Empty string or spaces are ignored (same as not providing the parameter)
+  - Only returns papers that match at least one of the specified interests
+- `keyword` (optional): Search keyword to filter papers by title or content. Performs substring matching.
+- `rss_source_id` (optional): Filter papers by specific RSS source ID. Only shows papers from that exact source.
+
+### Deprecated/Not Implemented Parameters
+⚠️ **Note:** The following parameters are declared but not currently implemented:
+- `matches` (optional): Declared but parsing logic is commented out. Passing values will have no effect.
+- `start` (optional): Time range start. Declared but not implemented.
+- `end` (optional): Time range end. Declared but not implemented.
+- `ignore_time_range` (optional): Declared but not implemented.
 
 ## Returns
 Returns an `AllVerifiedPapersResponse` object containing:
-- `pagination`: Pagination information (page, page_size, total, total_pages)
-- `papers`: Array of verified paper items with verification details
-- `interest_map`: Mapping of interest IDs to interest names
-- `source_map`: Mapping of source IDs to RSS source details
-- `user_interest_stats`: Statistics of matched papers per user interest
-- `today_count`: Count of papers verified today
-- `yesterday_count`: Count of papers verified yesterday
-- `older_than_three_days_count`: Count of papers verified more than 3 days ago
+
+### Pagination Object
+- `page` (i32): Current page number
+- `page_size` (i32): Items per page
+- `total` (u64): Total number of papers matching the filter criteria
+- `total_pages` (u64): Total number of pages
+
+When `ignore_pagination=true`:
+- `page`: Set to 1
+- `page_size`: Set to total count
+- `total_pages`: Set to 1
+
+### Papers Array
+Array of `PaperWithVerifications` objects, each containing:
+- Paper metadata: id, title, link, description, author, pub_date, etc.
+- Verification results for each matching interest (only match='Yes' verifications are included)
+- Status indicators and metadata
+
+**Important**: Only papers with at least one verification record where `match='Yes'` are returned. Papers with only 'No' or 'Partial' matches are excluded.
+
+### Interest Map
+- `HashMap<i64, String>`: Mapping of interest IDs to interest names
+- Keys are user interest IDs
+- Values are the interest keywords/phrases
+
+### Source Map
+- `HashMap<i32, rss_sources::Model>`: Mapping of RSS source IDs to complete source details
+- Keys are source IDs
+- Values include: id, channel, name, url, description, logo_img, background_img, timestamps
+
+## Example Requests
+
+### Paginated Request (Default)
+```
+GET /all-verified-papers?page=1&page_size=20
+```
+Returns first 20 papers.
+
+### Get All Data (No Pagination)
+```
+GET /all-verified-papers?ignore_pagination=true
+```
+Returns ALL verified papers for the user, regardless of count.
+
+### Filter by Channel
+```
+GET /all-verified-papers?channel=arxiv&page=1&page_size=10
+```
+Returns first 10 papers from the "arxiv" channel.
+
+### Filter by Interests
+```
+GET /all-verified-papers?user_interest_ids=1,2,3
+```
+Returns all papers that match interests with IDs 1, 2, or 3.
+
+### Search by Keyword
+```
+GET /all-verified-papers?keyword=machine%20learning
+```
+Returns papers whose title or content contains "machine learning".
+
+### Filter by Source
+```
+GET /all-verified-papers?rss_source_id=42
+```
+Returns all papers from RSS source with ID 42.
+
+### Combined Filters
+```
+GET /all-verified-papers?channel=arxiv&keyword=neural&user_interest_ids=1,2&page=2&page_size=50
+```
+Returns page 2 (items 51-100) of arxiv papers containing "neural" and matching interests 1 or 2.
+
+## Example Response
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": {
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 156,
+      "total_pages": 8
+    },
+    "papers": [
+      {
+        "id": 789,
+        "title": "Example Paper Title",
+        "link": "https://example.com/paper",
+        "description": "Paper description...",
+        "author": "John Doe",
+        "pub_date": "2024-01-01T00:00:00Z",
+        "channel": "arxiv",
+        "verifications": [
+          {
+            "id": 123,
+            "match": "Yes",
+            "relevance_score": 0.95,
+            "interest_id": 1
+          }
+        ]
+      }
+    ],
+    "interest_map": {
+      "1": "Machine Learning",
+      "2": "Natural Language Processing"
+    },
+    "source_map": {
+      "42": {
+        "id": 42,
+        "channel": "arxiv",
+        "name": "AI Research",
+        "url": "https://arxiv.org/feed",
+        "description": "Latest AI research papers",
+        "logo_img": null,
+        "background_img": null,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "last_fetched_at": "2024-01-01T10:00:00Z"
+      }
+    }
+  }
+}
+```
+
+## Use Cases
+- Display verified papers in feed UI with pagination
+- Export all verified papers (using `ignore_pagination=true`)
+- Filter by specific topics of interest
+- Search for papers by keyword
+- Show papers from specific RSS sources
+- Browse verified papers by channel
+
+## Related Endpoints
+- Use `POST /verify` to trigger verification of unverified papers
+- Use `GET /unverified-papers` to see papers awaiting verification
+- Use `POST /mark-as-read` to mark papers as read
+- Use `POST /batch-delete` to delete multiple papers
 "#,
     params(
         AllVerifiedPapersParams
@@ -391,50 +535,6 @@ pub async fn all_verified_papers(
     tracing::info!("list all verified papers");
     tracing::info!("user: {:?}, payload: {:?}", user, payload);
 
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    if verify_manager.is_day_gap(user.id).await? {
-        RssSubscriptionsQuery::update_subscription_latest_paper_ids(
-            &state.conn,
-            user.id,
-            payload.channel.as_deref(),
-        )
-        .await
-        .context(DbErrSnafu {
-            stage: "update-subscription-latest-paper-ids",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
-    }
-
-    verify_manager.wait_user_lock(user.id).await?;
-
-    // Parse comma-separated matches string to Vec<VerificationMatch>
-    let parsed_matches: Option<Vec<VerificationMatch>> =
-        payload.matches.as_ref().and_then(|matches_str| {
-            if matches_str.trim().is_empty() {
-                None
-            } else {
-                let matches: Result<Vec<VerificationMatch>, _> = matches_str
-                    .split(',')
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| match s.to_lowercase().as_str() {
-                        "yes" => Ok(VerificationMatch::Yes),
-                        "no" => Ok(VerificationMatch::No),
-                        "partial" => Ok(VerificationMatch::Partial),
-                        _ => Err(format!("Invalid match value: {s}")),
-                    })
-                    .collect();
-                matches.ok()
-            }
-        });
-
     // Parse comma-separated user_interest_ids string to Vec<i64>
     let parsed_user_interest_ids: Option<Vec<i64>> =
         payload.user_interest_ids.as_ref().and_then(|ids_str| {
@@ -450,19 +550,6 @@ pub async fn all_verified_papers(
                 ids.ok()
             }
         });
-
-    // Process time range, if start time is not specified, set to today's midnight
-    let time_range = payload.time_range.map(|tr| {
-        let start = tr.start.unwrap_or_else(|| {
-            // Get today's midnight (convert local time to fixed offset time)
-            let today_start = Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
-            Local
-                .from_local_datetime(&today_start)
-                .unwrap()
-                .fixed_offset()
-        });
-        (Some(start), tr.end)
-    });
 
     // Check if pagination should be ignored
     let use_pagination = !payload.ignore_pagination.unwrap_or(false);
@@ -482,15 +569,13 @@ pub async fn all_verified_papers(
         user.id,
         ListVerifiedParams {
             channel: payload.channel.clone(),
-            matches: parsed_matches,
             user_interest_ids: parsed_user_interest_ids,
-            time_range,
-            offset, // 使用计算出的 offset
-            limit,  // 使用计算出的 limit
-            ignore_time_range: payload.ignore_time_range,
+            offset, // Use calculated offset
+            limit,  // Use calculated limit
             keyword: payload.keyword.clone(),
             rss_source_id: payload.rss_source_id,
-            filter_by_unverified_lasted_paper_id: Some(!payload.ignore_time_range.unwrap_or(false)),
+            ignore_pagination: payload.ignore_pagination,
+            ignore_time_range: payload.ignore_time_range,
         },
     )
     .await
@@ -499,24 +584,25 @@ pub async fn all_verified_papers(
         code: ApiCode::COMMON_DATABASE_ERROR,
     })?;
 
-    // Query user interests and subscription sources
-    let interest_items = UserInterestsQuery::list_by_user_id(&state.conn, user.id)
-        .await
-        .context(DbErrSnafu {
-            stage: "list-user-interests",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
+    // Query user interests and subscription sources in parallel
+    let (interest_items_result, subscriptions_result) = tokio::join!(
+        UserInterestsQuery::list_by_user_id(&state.conn, user.id),
+        RssSubscriptionsQuery::list_by_user_id(&state.conn, user.id, None)
+    );
+
+    let interest_items = interest_items_result.context(DbErrSnafu {
+        stage: "list-user-interests",
+        code: ApiCode::COMMON_DATABASE_ERROR,
+    })?;
     let interest_map: HashMap<i64, String> = interest_items
         .into_iter()
         .map(|m| (m.id, m.interest))
         .collect();
 
-    let subscriptions = RssSubscriptionsQuery::list_by_user_id(&state.conn, user.id, None)
-        .await
-        .context(DbErrSnafu {
-            stage: "get-rss-subscriptions",
-            code: ApiCode::COMMON_DATABASE_ERROR,
-        })?;
+    let subscriptions = subscriptions_result.context(DbErrSnafu {
+        stage: "get-rss-subscriptions",
+        code: ApiCode::COMMON_DATABASE_ERROR,
+    })?;
     let mut source_ids: Vec<i32> = subscriptions.into_iter().map(|s| s.source_id).collect();
     source_ids.sort_unstable();
     source_ids.dedup();
@@ -533,22 +619,6 @@ pub async fn all_verified_papers(
     };
     let source_map: HashMap<i32, rss_sources::Model> =
         sources.into_iter().map(|m| (m.id, m)).collect();
-
-    // 补充 interest_map 中存在但 user_interest_stats 中不存在的统计数据
-    let mut user_interest_stats = verified_papers.user_interest_stats;
-    for interest_id in interest_map.keys() {
-        user_interest_stats.entry(*interest_id).or_insert(0);
-    }
-
-    let verify_manager = VerifyManager::new(
-        state.redis.clone().pool,
-        state.conn.clone(),
-        state.config.rss.feed_redis.redis_prefix.clone(),
-        state.config.rss.feed_redis.redis_key_default_expire,
-    )
-    .await;
-
-    let verify_info = verify_manager.get_user_unverified_info(user.id).await?;
 
     Ok(ApiResponse::data(AllVerifiedPapersResponse {
         pagination: if use_pagination {
@@ -570,11 +640,6 @@ pub async fn all_verified_papers(
         papers: verified_papers.items,
         interest_map,
         source_map,
-        verify_info,
-        user_interest_stats,
-        today_count: verified_papers.today_count,
-        yesterday_count: verified_papers.yesterday_count,
-        older_than_three_days_count: verified_papers.older_than_three_days_count,
     }))
 }
 
@@ -586,16 +651,148 @@ pub async fn all_verified_papers(
 Mark one or more verified papers as read for the authenticated user.
 
 ## Overview
-This endpoint allows users to mark papers as read, which updates their read status in the database.
+This endpoint allows users to mark verified papers as read, updating their `unread` status in the database. This operation is used to track user's reading progress and filter unread papers.
 
 ## Request Body
-The `MarkReadParams` should contain:
-- `paper_ids`: Array of paper IDs to mark as read
-- `channel` (optional): Channel filter
-- `read_all` (optional): Boolean flag to mark all papers as read
+
+```json
+{
+  "paper_ids": [1, 2, 3, 4, 5],
+  "channel": "arxiv",
+  "read_all": false
+}
+```
+
+### Parameters
+- `paper_ids` (required): Array of paper IDs to mark as read. Should be IDs of verified papers for the authenticated user.
+- `channel` (optional): Channel filter. When provided, only papers from this channel will be affected. If not provided, no channel filtering is applied.
+- `read_all` (required, boolean): When `true`, marks ALL user's papers as read (ignores `paper_ids`). When `false`, marks only the specified `paper_ids`.
+
+## Behavior Modes
+
+### Mode 1: Mark Specific Papers (`read_all=false`)
+```json
+{
+  "paper_ids": [1, 2, 3],
+  "read_all": false
+}
+```
+- Marks only the specified paper IDs as read
+- If any ID doesn't exist or doesn't belong to the user, it's silently ignored
+- Returns count of actually marked papers (may be less than provided IDs)
+
+### Mode 2: Mark All Papers (`read_all=true`)
+```json
+{
+  "paper_ids": [],  // Ignored when read_all=true
+  "read_all": true
+}
+```
+- Marks ALL user's verified papers as read
+- `paper_ids` array is ignored
+- Useful for "mark all as read" functionality
+- More efficient for bulk operations
+
+### Mode 3: Mark All in Channel
+```json
+{
+  "paper_ids": [],  // Ignored when read_all=true
+  "channel": "arxiv",
+  "read_all": true
+}
+```
+- Marks all papers from the specified channel as read
+- Limits scope to a specific channel
+- Useful for channel-specific "mark all as read"
 
 ## Returns
 Returns a `u64` representing the number of papers successfully marked as read.
+
+Examples:
+- `0`: No papers were marked (e.g., invalid IDs)
+- `5`: 5 papers were marked as read
+- `156`: All 156 papers were marked (when using `read_all=true`)
+
+## Important Notes
+- This operation only affects verified papers (not unverified)
+- Non-existent or invalid paper IDs are silently ignored (not counted in return value)
+- The operation is performed in a single transaction (all or nothing)
+- Marking papers as read removes them from "unread" counts and filter lists
+- Can be called multiple times safely (idempotent operation)
+- `read_all=true` overrides the `paper_ids` parameter
+
+## Error Handling
+- Invalid or missing `read_all` flag: Request rejected with validation error
+- Empty `paper_ids` with `read_all=false`: Returns 0 (no papers marked)
+
+## Example Requests
+
+### Mark Individual Papers
+**Request:**
+```json
+{
+  "paper_ids": [42, 1337],
+  "read_all": false
+}
+```
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": 2
+}
+```
+Returns 2 if both papers were successfully marked.
+
+### Mark All Papers
+**Request:**
+```json
+{
+  "paper_ids": [],
+  "read_all": true
+}
+```
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": 156
+}
+```
+Returns total count of all verified papers marked as read.
+
+### Mark All in Specific Channel
+**Request:**
+```json
+{
+  "paper_ids": [],
+  "channel": "arxiv",
+  "read_all": true
+}
+```
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": 42
+}
+```
+Returns count of papers from "arxiv" channel marked as read.
+
+## Use Cases
+- User reads a paper and marks it as read
+- Batch mark multiple papers as read after review
+- "Mark all as read" for all verified papers
+- "Mark channel as read" for specific RSS channel
+- Reset unread counts
+- Clean up read status when archiving papers
+
+## Related Endpoints
+- Use `GET /all-verified-papers` to retrieve papers (filter by unread status)
+- Use `GET /unread-count` to get count of unread papers
 "#,
     request_body = MarkReadParams,
     responses(
@@ -674,164 +871,6 @@ pub async fn batch_delete(
     Ok(ApiResponse::data(affected))
 }
 
-// SSE message handler for forwarding Redis PubSub messages to SSE stream
-struct SseMessageHandler {
-    user_id: i64,
-    channel: String,
-    sender: broadcast::Sender<String>,
-}
-
-impl SseMessageHandler {
-    fn new(user_id: i64, channel: String, sender: broadcast::Sender<String>) -> Self {
-        Self {
-            user_id,
-            channel,
-            sender,
-        }
-    }
-}
-
-impl feed::redis::pubsub::MessageHandler for SseMessageHandler {
-    fn event_name(&self) -> String {
-        RedisPubSubManager::build_user_channel(&self.channel, self.user_id)
-    }
-
-    fn handle(&self, message: String) {
-        tracing::info!("Received Redis message for user {}", self.user_id);
-
-        // Parse message to check if there's at least one "yes" match
-        let result_with_stats: VerifyResultWithStats = match serde_json::from_str(&message) {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to parse Redis message as VerifyResultWithStats: {}",
-                    e
-                );
-                tracing::debug!("Raw message that failed to parse: {}", message);
-                // If parsing fails, forward anyway to maintain backward compatibility
-                match self.sender.send(message) {
-                    Ok(_) => {
-                        tracing::info!(
-                            "Successfully sent message to SSE stream for user {}",
-                            self.user_id
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to send message to SSE stream for user {}: {}",
-                            self.user_id,
-                            e
-                        );
-                    }
-                }
-                // if self.sender.send(message).is_err() {
-                //     tracing::warn!(
-                //         "Failed to send message to SSE stream for user {}",
-                //         self.user_id
-                //     );
-                // }
-                return;
-            }
-        };
-
-        // Check if verification_details exists and has at least one "yes" match
-        let has_yes_match = has_match_yes_in_results(&result_with_stats.verification_details);
-
-        tracing::debug!(
-            "Paper has {} verifications, has_yes_match: {}",
-            result_with_stats
-                .verification_details
-                .as_ref()
-                .map(|v| v.verifications.len())
-                .unwrap_or(0),
-            has_yes_match
-        );
-
-        // Only forward message if there is at least one "yes" match
-        if !has_yes_match {
-            tracing::info!(
-                "No 'yes' match found in verifications, skipping message for user {}",
-                self.user_id
-            );
-            return;
-        }
-
-        tracing::info!(
-            "Forwarding message with 'yes' match to SSE stream for user {}",
-            self.user_id
-        );
-
-        // Forward Redis message to SSE stream
-        if self.sender.send(message).is_err() {
-            tracing::warn!(
-                "Failed to send message to SSE stream for user {}",
-                self.user_id
-            );
-        }
-    }
-}
-
-// Connection status monitor
-struct ConnectionMonitor {
-    user_id: i64,
-    is_connected: Arc<AtomicBool>,
-    pubsub_manager: feed::redis::pubsub::RedisPubSubManager,
-    channel: String,
-}
-
-impl ConnectionMonitor {
-    fn new(
-        user_id: i64,
-        pubsub_manager: feed::redis::pubsub::RedisPubSubManager,
-        channel: String,
-    ) -> Self {
-        Self {
-            user_id,
-            is_connected: Arc::new(AtomicBool::new(true)),
-            pubsub_manager,
-            channel,
-        }
-    }
-
-    fn is_connected(&self) -> bool {
-        self.is_connected.load(Ordering::Relaxed)
-    }
-}
-
-impl Drop for ConnectionMonitor {
-    fn drop(&mut self) {
-        self.is_connected.store(false, Ordering::Relaxed);
-        tracing::info!(
-            "SSE connection dropped for user: {}, performing cleanup...",
-            self.user_id
-        );
-
-        // Unsubscribe from Redis PubSub
-        let mut pubsub_manager = self.pubsub_manager.clone();
-        let channel = self.channel.clone();
-        let user_id = self.user_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = pubsub_manager.unsubscribe(&channel).await {
-                tracing::error!(
-                    "Failed to unsubscribe from Redis channel '{}' for user {}: {}",
-                    channel,
-                    user_id,
-                    e
-                );
-            } else {
-                tracing::info!(
-                    "Successfully unsubscribed from Redis channel '{}' for user {}",
-                    channel,
-                    user_id
-                );
-            }
-        });
-
-        tracing::info!("Cleanup completed for user: {}", self.user_id);
-    }
-}
-
 #[utoipa::path(
     post,
     path = "/stream-verify",
@@ -840,133 +879,63 @@ impl Drop for ConnectionMonitor {
 Establish a Server-Sent Events (SSE) connection to receive real-time updates during paper verification.
 
 ## Overview
-This endpoint creates a persistent SSE connection that streams verification progress updates to the client in real-time. It's useful for showing live progress in the UI.
+This endpoint creates a persistent SSE connection that streams verification progress updates to the client in real-time. It automatically adds the user to the verification queue via `append_user_to_verify_list`, which triggers the background worker to start processing unverified papers. The connection subscribes to Redis pub/sub channels to forward verification events as they occur.
 
 ## Request Body
+
 ```json
 {
   "channel": "arxiv",
-  "max_match_limit_per_user": 50
+  "max_match_limit_per_user": 50,
+  "search_params": null,
+  "ignore_ready_event": false
 }
 ```
 
-## Parameters
-- `channel` (optional): Channel to filter verification updates
-- `max_match_limit_per_user` (optional): Maximum number of papers to match per user. When this limit is reached, a `match_limit_reached` event will be sent and the connection will be closed
+### Parameters
+- `channel` (optional): Channel to filter papers for verification. When provided, only papers from this channel will be verified.
+- `max_match_limit_per_user` (optional): Maximum number of matched papers per user. Defaults to system configuration value. When the matched paper count reaches this limit, a `match_limit_reached` event is sent and the connection is closed.
+- `search_params` (optional): Advanced filtering parameters for papers to include in verification. When provided, the `verify_paper_success` events will include a `statistics` field with filtered statistics. Structure:
+  ```json
+  {
+    "user_interest_ids": [1, 2, 3],
+    "keyword": "machine learning",
+    "rss_source_id": 42,
+    "channel": "arxiv",
+    "ignore_pagination": true
+  }
+  ```
+- `ignore_ready_event` (optional): Whether to skip sending the initial `ready` event. Defaults to `false`. When set to `true`, the SSE stream will not send the `ready` event at the start of verification.
 
 ## SSE Event Types
-The stream emits the following event types:
 
-1. **heartbeat**: Periodic status updates every 5 seconds
-   - Contains: user_id, verify_info, timestamp, status, is_completed
-   
-2. **verify_paper_success**: Sent when a paper is successfully verified (only for papers with at least one "Yes" match)
-   - Contains: verification_details (paper info and verification results), user_verify_info (user statistics), timestamp, status
-   
-3. **verify_completed**: Sent when all papers have been verified
-   - Contains: timestamp, status, is_completed flag
-   - The connection will be closed after sending this event
+1. **ready**: Initial event sent when verification task is ready to start
+   - Contains: user_id, verify_info, timestamp, status
 
-4. **match_limit_reached**: Sent when the matched paper count reaches the maximum limit
+2. **processing**: Sent when verification task starts processing
+   - Contains: user_id, verify_info, timestamp, status
+
+3. **heartbeat**: Periodic status updates every 1 second
+   - Contains: user_id, verify_info (optional), timestamp, status, is_completed
+
+4. **verify_paper_success**: Sent when a paper is successfully verified
+   - Contains: verification_details (paper info and verification results), verify_info (user statistics), timestamp, status
+   - If `search_params` was provided, also includes a `statistics` field with filtered verification statistics
+
+5. **verify_completed**: Sent when all papers have been verified
+   - Contains: verify_info, timestamp, status, is_completed flag
+   - The connection closes after this event
+
+6. **match_limit_reached**: Sent when the matched paper count reaches the maximum limit
    - Contains: user_id, matched, max_limit, timestamp, status
-   - The connection will be closed after sending this event
-
-## Event Data Structure
-
-### heartbeat event
-```json
-{
-  "type": "heartbeat",
-  "user_id": 123,
-  "verify_info": {
-    "pending_unverify_count": 10,
-    "success_count": 5,
-    "fail_count": 1,
-    "processing_count": 2,
-    "total": 18,
-    "token_usage": 1500,
-    "matched_count": 8,
-    "max_match_limit": 50,
-    "total_matched_count": 8
-  },
-  "timestamp": "2024-01-01T12:00:00Z",
-  "status": "connected",
-  "is_completed": false
-}
-```
-
-### verify_paper_success event
-```json
-{
-  "type": "verify_paper_success",
-  "verification_details": {
-    "paper": {
-      "id": 456,
-      "title": "Example Paper Title",
-      "arxiv_id": "2401.12345",
-      "abstract": "Paper abstract...",
-      "published_at": "2024-01-01T00:00:00Z",
-      // ... other paper fields
-    },
-    "verifications": [
-      {
-        "id": 789,
-        "user_id": 123,
-        "paper_id": 456,
-        "user_interest": {
-          "id": 1,
-          "interest": "Machine Learning",
-          // ... other interest fields
-        },
-        "match": "Yes",
-        "relevance_score": 0.95,
-        "verified_at": "2024-01-01T12:00:00Z",
-        "channel": "arxiv",
-        "metadata": null,
-        "unread": true,
-        "created_at": "2024-01-01T12:00:00Z",
-        "updated_at": "2024-01-01T12:00:00Z"
-      }
-    ]
-  },
-  "user_verify_info": {
-    "pending_unverify_count": 9,
-    "success_count": 6,
-    "fail_count": 1,
-    "processing_count": 2,
-    "total": 18,
-    "token_usage": 1600,
-    "matched_count": 9,
-    "max_match_limit": 50,
-    "total_matched_count": 9
-  },
-  "timestamp": "2024-01-01T12:00:00Z",
-  "status": "connected",
-  "is_completed": false
-}
-```
-
-### match_limit_reached event
-```json
-{
-  "type": "match_limit_reached",
-  "user_id": 123,
-  "matched": 50,
-  "max_limit": 50,
-  "timestamp": "2024-01-01T12:05:00Z",
-  "status": "limit_reached"
-}
-```
+   - The connection closes after this event
 
 ## Connection Management
-- Connection automatically updates user interest metadata before starting
+- Automatically adds user to verification list before starting (triggers background worker)
 - Subscribes to Redis pub/sub for real-time updates
 - Automatically unsubscribes and cleans up when connection is closed
 - Sends keep-alive messages every 10 seconds
-- Only forwards papers with at least one "Yes" match
-- Monitors matched paper count and disconnects when reaching the specified limit (if provided)
-  - When matched_count >= max_match_limit_per_user, a `match_limit_reached` event is sent
-  - The connection is then closed to prevent further processing
+- Heartbeat events sent every 1 second with current verification status
 
 ## Note
 This is a long-lived connection. The client should be prepared to handle connection drops and reconnect if needed. The connection may be terminated early if the maximum match limit is reached.
@@ -988,30 +957,6 @@ pub async fn stream_verify(
     let user_id = user.id;
     let verify_papers_sub_channel = state.config.rss.verify_papers_channel.clone();
 
-    let result = run_update_user_interest_metadata(
-        Some(user_id.to_string()),
-        state.config.clone(),
-        state.conn.clone(),
-        state.redis.pool.clone(),
-        state.config.llm.model.to_string(),
-    )
-    .await;
-    if result.is_err() {
-        tracing::error!(
-            "Failed to update user interest metadata: {}",
-            result.err().unwrap()
-        );
-        // Return error stream
-        return Sse::new(Box::pin(stream::once(async {
-            Err(ApiError::CustomError {
-                message: "Failed to update user interest metadata".to_string(),
-                code: ApiCode::COMMON_FEED_ERROR,
-            })
-        })));
-    } else {
-        tracing::info!("Successfully updated user interest metadata");
-    }
-
     // Create connection monitor, automatically triggers Drop when SSE stream ends
     let monitor = ConnectionMonitor::new(
         user_id,
@@ -1020,7 +965,7 @@ pub async fn stream_verify(
     );
 
     // Create broadcast channel for Redis PubSub message forwarding
-    let (tx, rx) = broadcast::channel::<String>(100);
+    let (tx, rx) = broadcast::channel::<String>(1000);
 
     // Create message handler to forward Redis messages to SSE stream
     let handler = Box::new(SseMessageHandler::new(
@@ -1035,275 +980,53 @@ pub async fn stream_verify(
         pubsub_manager.add_listener(handler).await;
     });
 
-    let verify_manager = VerifyManager::new(
+    let verify_service = VerifyService::new(
         state.redis.clone().pool,
         state.conn.clone(),
+        state.redis.pubsub_manager.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
         state.config.rss.feed_redis.redis_key_default_expire,
+        state.config.rss.verify_papers_channel.clone(),
     )
     .await;
+
+    let verify_service_for_append = verify_service.clone();
+    let append_user_id = user_id;
+    let append_limit = Some(state.config.rss.max_rss_paper as i32);
+    let append_channel = payload.channel.clone();
+    let append_max_limit = payload
+        .max_match_limit_per_user
+        .unwrap_or(state.config.rss.max_match_limit_per_user as i32);
+    let append_delay_ms = state.config.rss.update_task_merge_delay_ms.unwrap_or(500);
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(append_delay_ms)).await;
+        if let Err(e) = verify_service_for_append
+            .append_user_to_verify_list(
+                append_user_id,
+                append_limit,
+                append_channel,
+                append_max_limit,
+            )
+            .await
+        {
+            tracing::error!("Failed to append user to verify list: {}", e);
+        }
+    });
 
     // Capture needed vars for SSE closure to avoid moving out of captured variables
     let search_params_for_sse = payload.search_params.clone().map(std::sync::Arc::new);
     let conn_clone_for_sse = state.conn.clone();
 
-    let stream = stream::unfold(
-        (
-            monitor,
-            rx,
-            verify_manager.clone(),
-            false, // Add completion flag
-            search_params_for_sse.clone(),
-            conn_clone_for_sse.clone(),
-        ),
-        move |(
-            monitor,
-            mut receiver,
-            verify_manager_clone,
-            mut is_completed,
-            search_params_for_sse,
-            conn_clone_for_sse,
-        )| async move {
-            // Check if connection is still active or already completed
-            if !monitor.is_connected() || is_completed {
-                tracing::info!("Ending SSE stream for user: {}", user_id);
-                return None;
-            }
-
-            // Check verification status before waiting
-            let verify_info = verify_manager_clone
-                .get_user_unverified_info(user_id)
-                .await
-                .unwrap();
-
-            // Check if match limit has been reached
-            if verify_info.max_match_limit > 0
-                && verify_info.matched_count >= verify_info.max_match_limit
-            {
-                tracing::info!(
-                    "Match limit reached for user {}: matched={}, max_limit={}. Sending match_limit_reached event and disconnecting SSE stream.",
-                    user_id,
-                    verify_info.matched_count,
-                    verify_info.max_match_limit
-                );
-
-                let limit_event_data = serde_json::json!({
-                    "type": "match_limit_reached",
-                    "user_id": user_id,
-                    "matched": verify_info.matched_count,
-                    "max_limit": verify_info.max_match_limit,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                    "status": "limit_reached",
-                });
-
-                let limit_event: Result<Event, ApiError> = Ok(Event::default()
-                    .event("match_limit_reached")
-                    .data(format!("data: {limit_event_data}")));
-
-                is_completed = true;
-                return Some((
-                    limit_event,
-                    (
-                        monitor,
-                        receiver,
-                        verify_manager_clone,
-                        is_completed,
-                        search_params_for_sse,
-                        conn_clone_for_sse,
-                    ),
-                ));
-            }
-
-            let verification_completed = verify_info.total == 0
-                || (verify_info.success_count + verify_info.fail_count) >= verify_info.total
-                || (verify_info.processing_count + verify_info.pending_unverify_count) == 0;
-
-            if verification_completed {
-                // If completed, send completion event and mark as completed
-                tracing::info!(
-                    "Verification completed for user {}, sending completion event",
-                    user_id
-                );
-
-                let completion_event_data = serde_json::json!({
-                    "type": "verify_completed",
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                    "verify_info": verify_info,
-                    "status": "completed",
-                    "is_completed": true,
-                });
-
-                let completion_event: Result<Event, ApiError> = Ok(Event::default()
-                    .event("verify_completed")
-                    .data(format!("data: {completion_event_data}")));
-
-                is_completed = true;
-                return Some((
-                    completion_event,
-                    (
-                        monitor,
-                        receiver,
-                        verify_manager_clone,
-                        is_completed,
-                        search_params_for_sse,
-                        conn_clone_for_sse,
-                    ),
-                ));
-            }
-
-            // Use tokio::select! to simultaneously listen to timer, Redis messages and shutdown signal
-            tokio::select! {
-                // Listen for shutdown signal
-                _ = signal::ctrl_c() => {
-                    tracing::info!("SSE stream received shutdown signal for user: {}", user_id);
-                    None
-                }
-                // Send heartbeat message periodically
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                    // Get current verify info for heartbeat
-                    let verify_info = match verify_manager_clone.get_user_unverified_info(user_id).await {
-                        Ok(info) => info,
-                        Err(e) => {
-                            tracing::error!("Failed to get verify info for heartbeat: {}", e);
-                            return None;
-                        }
-                    };
-
-                    // Send normal heartbeat (completion already checked before select)
-                    let event_data = serde_json::json!({
-                        "type": "heartbeat",
-                        "user_id": user_id,
-                        "verify_info": verify_info,
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                        "status": "connected",
-                        "is_completed": false,
-                    });
-
-                    let event: Result<Event, ApiError> = Ok(Event::default()
-                        .event("heartbeat")
-                        .data(format!("data: {event_data}")));
-
-                    Some((
-                        event,
-                        (
-                            monitor,
-                            receiver,
-                            verify_manager_clone,
-                            is_completed,
-                            search_params_for_sse,
-                            conn_clone_for_sse,
-                        ),
-                    ))
-                }
-                // Receive Redis PubSub messages
-                result = receiver.recv() => {
-                    match result {
-                        Ok(message) => {
-                            tracing::info!("Forwarding Redis message to SSE for user {}", user_id);
-
-                            // Parse the message as VerifyResultWithStats
-                            let result_with_stats: VerifyResultWithStats = match serde_json::from_str(&message) {
-                                Ok(value) => value,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to parse message as VerifyResultWithStats: {}. Skipping message.",
-                                        e
-                                    );
-                                    // Skip this message and continue to next iteration
-                                    return Some((
-                                        Ok(Event::default().event("error").data("data: {\"type\":\"error\",\"message\":\"Failed to parse message\"}")),
-                                        (
-                                            monitor,
-                                            receiver,
-                                            verify_manager_clone,
-                                            is_completed,
-                                            search_params_for_sse,
-                                            conn_clone_for_sse,
-                                        )
-                                    ));
-                                }
-                            };
-
-
-
-                            // Optionally compute statistics and embed into event payload
-                            let mut statistics_json: Option<serde_json::Value> = None;
-                            let sp = search_params_for_sse.clone();
-                            if let Some(sp) = sp {
-                                let params = (*sp).clone();
-                                match UserPaperVerificationsQuery::get_verified_statistics_by_user(
-                                    &conn_clone_for_sse,
-                                    user_id,
-                                    params,
-                                )
-                                .await
-                                {
-                                    Ok(stats) => {
-                                        statistics_json = Some(serde_json::to_value(stats).unwrap_or_else(|_| serde_json::json!({})));
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("failed to get verified statistics: {}", e);
-                                    }
-                                }
-                            }
-
-                            // Build verify_paper_success payload
-                            let mut event_obj = serde_json::json!({
-                                "type": "verify_paper_success",
-                                "verification_details": result_with_stats.verification_details,
-                                "verify_info": result_with_stats.user_verify_info,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                "status": "connected",
-                                "is_completed": false,
-                            });
-                            if let Some(stats) = statistics_json {
-                                if let Some(map) = event_obj.as_object_mut() {
-                                    map.insert("statistics".to_string(), stats);
-                                }
-                            }
-                            let event_data = event_obj;
-
-                            let event: Result<Event, ApiError> = Ok(Event::default()
-                                .event("verify_paper_success")
-                                .data(format!("data: {event_data}")));
-
-                            // Return the event (limit check will happen on next iteration)
-                            Some((
-                                event,
-                                (
-                                    monitor,
-                                    receiver,
-                                    verify_manager_clone,
-                                    is_completed,
-                                    search_params_for_sse,
-                                    conn_clone_for_sse,
-                                ),
-                            ))
-                        }
-                        Err(_) => {
-                            tracing::warn!("Redis message receiver closed for user {}", user_id);
-                            // End SSE stream (trigger Drop cleanup and unsubscribe), avoid infinite loop and blocking graceful shutdown
-                            None
-                        }
-                    }
-                }
-            }
-        },
+    let stream = create_verify_stream(
+        user_id,
+        monitor,
+        rx,
+        verify_service,
+        search_params_for_sse,
+        conn_clone_for_sse,
+        payload.ignore_ready_event.unwrap_or(false),
     );
-
-    if let Err(e) = verify_manager
-        .append_user_to_verify_list(
-            user_id,
-            Some(state.config.rss.max_rss_paper as i32),
-            payload.channel,
-            payload
-                .max_match_limit_per_user
-                .unwrap_or(state.config.rss.max_match_limit_per_user as i32),
-        )
-        .await
-    {
-        tracing::error!("Failed to append user to verify list: {}", e);
-    }
 
     Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
@@ -1373,30 +1096,36 @@ pub async fn all_users_verify_info(
     );
     tracing::info!("user id: {:?}", user);
 
-    let verify_manager = VerifyManager::new(
+    let verify_service = VerifyService::new(
         state.redis.clone().pool,
         state.conn.clone(),
+        state.redis.pubsub_manager.clone(),
         state.config.rss.feed_redis.redis_prefix.clone(),
         state.config.rss.feed_redis.redis_key_default_expire,
+        state.config.rss.verify_papers_channel.clone(),
     )
     .await;
 
     // Get all user IDs from verify list
-    let user_ids = verify_manager.get_user_verify_list().await?;
+    let user_ids = verify_service.get_active_verification_users().await?;
 
     tracing::info!("Found {} users in verify list", user_ids.len());
 
     // Get verify info for each user
     let mut results = Vec::new();
     for user_id in user_ids {
-        match verify_manager.get_user_unverified_info(user_id).await {
-            Ok(info) => {
+        match verify_service
+            .get_user_verify_statistics(user_id, None)
+            .await
+        {
+            Ok(verify_statistics) => {
                 // If this is the current user, include user info
                 let user_info = if user_id == user.id {
                     Some(user.clone())
                 } else {
                     None
                 };
+                let info = verify_statistics.verify_info;
 
                 results.push(UserVerifyInfoItem {
                     user_id,
