@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use feed::workers::{base::RedisService, verify_user_papers::run_verify_with_input};
+use paper::scholar::paper::{Paper, PaperSource};
 use protocol::tasks::verify::Criteria;
 use seaorm_db::connection::get_db;
-use search::web::scholar::paper::{Paper, PaperSource};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
