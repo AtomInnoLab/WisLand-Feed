@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use conf::config::app_config;
 use feed::parsers::arxiv::convert_rss_paper_model_to_paper;
 use feed::workers::{base::RedisService, verify_user_papers::run_verify_with_input};
+use paper::scholar::paper::Paper;
 use protocol::tasks::verify::Criteria;
 use sea_orm::{EntityTrait, QueryOrder, QuerySelect};
 use seaorm_db::connection::get_db;
@@ -100,7 +101,7 @@ async fn bench_verify_by_order() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // convert to Paper inputs
-    let papers: Vec<search::web::scholar::paper::Paper> = papers_models
+    let papers: Vec<Paper> = papers_models
         .iter()
         .map(convert_rss_paper_model_to_paper)
         .collect();
