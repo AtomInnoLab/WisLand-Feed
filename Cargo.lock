@@ -839,6 +839,7 @@ dependencies = [
 [[package]]
 name = "chunk-splitter"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -945,6 +946,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.0.1"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "axum 0.8.6",
  "bb8",
@@ -998,6 +1000,7 @@ dependencies = [
 [[package]]
 name = "conf"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "arc-swap",
  "figment",
@@ -1645,6 +1648,7 @@ dependencies = [
 [[package]]
 name = "feed"
 version = "0.0.1"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "apalis",
  "apalis-cron",
@@ -3077,6 +3081,7 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 [[package]]
 name = "migration"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "sea-orm",
  "sea-orm-migration",
@@ -3129,6 +3134,7 @@ dependencies = [
 [[package]]
 name = "model-hub"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -3661,6 +3667,7 @@ dependencies = [
 [[package]]
 name = "oss"
 version = "0.0.1"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "conf",
  "opendal",
@@ -3696,6 +3703,7 @@ dependencies = [
 [[package]]
 name = "paper"
 version = "0.0.1"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3715,6 +3723,7 @@ dependencies = [
  "tracing",
  "typed-builder",
  "urlencoding",
+ "utoipa",
  "uuid",
 ]
 
@@ -4243,6 +4252,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.0.1"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -5207,6 +5217,7 @@ checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 [[package]]
 name = "seaorm-db"
 version = "0.0.1"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5230,6 +5241,7 @@ dependencies = [
 [[package]]
 name = "search"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5653,6 +5665,7 @@ dependencies = [
 [[package]]
 name = "sparse-emb"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "anyhow",
  "common",
@@ -6934,6 +6947,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
+source = "git+ssh://git@github.com/AtomInnoLab/WisAgent.git?branch=dev#cf78bd5567ad6550f41b8231c37bc186a0b809f6"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
