@@ -1,12 +1,13 @@
 use std::io::Cursor;
 
-use dotenvy::from_read;
+use dotenvy::{dotenv, from_read};
 use nacos_sdk::api::config::ConfigServiceBuilder;
 use nacos_sdk::api::props::ClientProps;
 
 #[derive(Debug)]
 pub enum NacosConfigError {
-    UnsupportedEnvironment(String),
+    MissingEndpoint,
+    MissingNamespace,
     BuildConfigService(String),
     FetchConfig(String),
     ParseConfig(String),
@@ -15,9 +16,6 @@ pub enum NacosConfigError {
 impl std::fmt::Display for NacosConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NacosConfigError::UnsupportedEnvironment(env) => {
-                write!(f, "unsupported environment: {env}")
-            }
             NacosConfigError::BuildConfigService(err) => {
                 write!(f, "failed to build nacos config service: {err}")
             }
@@ -25,6 +23,8 @@ impl std::fmt::Display for NacosConfigError {
                 write!(f, "failed to fetch nacos config: {err}")
             }
             NacosConfigError::ParseConfig(err) => write!(f, "failed to parse nacos config: {err}"),
+            NacosConfigError::MissingEndpoint => write!(f, "NACOS_ENDPOINT is not set"),
+            NacosConfigError::MissingNamespace => write!(f, "NACOS_NAMESPACE is not set"),
         }
     }
 }
@@ -36,25 +36,16 @@ pub async fn load_env_from_nacos(
     app_name: &str,
     group_name: &str,
 ) -> Result<(), NacosConfigError> {
-    let env_raw = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "local".to_string());
-    let environment = env_raw.to_lowercase();
-    println!("Loading configuration from Nacos for environment: {environment}");
+    dotenv().ok();
 
-    let namespace_id = match environment.as_str() {
-        "local" => "28452470-afb0-4698-bd51-ad8508f84798",
-        "dev" => "8d222d2a-b3f7-4229-b44d-e8b305f9f512",
-        "pre" => "918b7045-4408-474d-8cb5-541ff94e5584",
-        "prod" => "your-prod-namespace-id",
-        other => return Err(NacosConfigError::UnsupportedEnvironment(other.to_string())),
-    };
-
-    let server_addr = match environment.as_str() {
-        "local" => "mse-9996a1110-p.nacos-ans.mse.aliyuncs.com:8848",
-        _ => "mse-9996a1110-nacos-ans.mse.aliyuncs.com:8848",
-    };
+    let endpoint =
+        std::env::var("NACOS_ENDPOINT").map_err(|_| NacosConfigError::MissingEndpoint)?;
+    let namespace_id =
+        std::env::var("NACOS_NAMESPACE").map_err(|_| NacosConfigError::MissingNamespace)?;
+    println!("Loading configuration from Nacos: endpoint={endpoint}, namespace={namespace_id}");
 
     let client_props = ClientProps::new()
-        .server_addr(server_addr)
+        .server_addr(endpoint)
         .namespace(namespace_id)
         .app_name(app_name);
 

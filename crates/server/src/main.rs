@@ -1,6 +1,5 @@
 use axum::BoxError;
 use conf::config::app_config;
-use dotenvy::dotenv;
 use nacos_config::load_env_from_nacos;
 use server::{app::build_app, state::app_state::graceful_shutdown};
 use std::net::{IpAddr, SocketAddr};
@@ -10,7 +9,6 @@ use tracing::*;
 async fn main() -> Result<(), BoxError> {
     if let Err(err) = load_env_from_nacos(".env", "wisland-feed", "wisland-feed").await {
         eprintln!("failed to load env from nacos: {err}");
-        dotenv().ok();
     }
     let config = app_config();
 
