@@ -7,7 +7,7 @@ use crate::{
 };
 use axum::Json;
 use axum::extract::{Query, State};
-use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::sse::{Event, KeepAlive, KeepAliveStream, Sse};
 use chrono::{DateTime, FixedOffset};
 use common::{error::api_error::*, prelude::ApiCode};
 use feed::dispatch;
@@ -952,7 +952,7 @@ pub async fn stream_verify(
     State(state): State<AppState>,
     User(user): User,
     Json(payload): Json<StreamVerifyRequest>,
-) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>> {
+) -> Sse<KeepAliveStream<Pin<Box<dyn Stream<Item = Result<Event, ApiError>> + Send>>>> {
     tracing::info!("SSE connection established for user: {}", user.id);
     let user_id = user.id;
     let verify_papers_sub_channel = state.config.rss.verify_papers_channel.clone();

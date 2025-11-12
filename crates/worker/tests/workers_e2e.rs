@@ -91,7 +91,7 @@ async fn wait_for_new_logs(
                 elapsed_ms = start.elapsed().as_millis() as u64,
                 now, delta, "timeout waiting for new logs"
             );
-            anyhow::bail!("timeout waiting for logs for {}", task_type);
+            anyhow::bail!("timeout waiting for logs for {task_type}");
         }
         debug!(now, delta, "not enough logs yet; sleeping 500ms");
         thread::sleep(Duration::from_millis(500));
