@@ -1,0 +1,8 @@
+[package]
+name = "nacos_config"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dotenvy = { workspace = true }
+nacos-sdk = { workspace = true }

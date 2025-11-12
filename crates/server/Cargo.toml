@@ -33,6 +33,7 @@ http = { workspace = true }
 chrono = { workspace = true }
 dotenvy = { workspace = true }
 
+nacos_config = { path = "../nacos_config" }
 http-body-util = "0.1.3"
 tower-http = { version = "0.6", features = ["trace", "catch-panic"] }
 # redis
