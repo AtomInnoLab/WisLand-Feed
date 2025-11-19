@@ -31,7 +31,7 @@ pub async fn build_app() -> Result<(Router, AppState), ApiError> {
     // get app config
     let config = app_config();
 
-    info!("config: {:?}", config);
+    info!("Configuration loaded");
     // build app state
     let state = AppState::new().await;
 
@@ -47,10 +47,10 @@ pub async fn build_app() -> Result<(Router, AppState), ApiError> {
     // build the final router with Swagger UI and Scalar documentation
     let router = router
         .merge(
-            SwaggerUi::new(format!("{url_prefix}/swagger-ui"))
-                .url(format!("{url_prefix}/openapi.json"), api.clone()),
+            SwaggerUi::new(format!("{url_prefix}/common/swagger-ui"))
+                .url(format!("{url_prefix}/common/openapi.json"), api.clone()),
         )
-        .merge(Scalar::with_url(format!("{url_prefix}/docs"), api))
+        .merge(Scalar::with_url(format!("{url_prefix}/common/docs"), api))
         .layer(CatchPanicLayer::custom(PanicHandler)) // panic handler
         // .layer(middleware::from_fn(log::log_response))
         .layer(middleware::from_fn(log::log_request))

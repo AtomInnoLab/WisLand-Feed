@@ -42,7 +42,7 @@ pub async fn load_env_from_nacos(
         std::env::var("NACOS_ENDPOINT").map_err(|_| NacosConfigError::MissingEndpoint)?;
     let namespace_id =
         std::env::var("NACOS_NAMESPACE").map_err(|_| NacosConfigError::MissingNamespace)?;
-    println!("Loading configuration from Nacos: endpoint={endpoint}, namespace={namespace_id}");
+    println!("Start loading configuration from Nacos");
 
     let client_props = ClientProps::new()
         .server_addr(endpoint)
@@ -58,11 +58,10 @@ pub async fn load_env_from_nacos(
         .await
         .map_err(|e| NacosConfigError::FetchConfig(e.to_string()))?;
 
-    println!("config_resp: {config_resp:?}");
+    println!("Nacos configuration fetched");
 
     let mut cursor = Cursor::new(config_resp.content().as_bytes().to_vec());
     from_read(&mut cursor).map_err(|e| NacosConfigError::ParseConfig(e.to_string()))?;
-
-    println!("Nacos configuration loaded and applied to environment variables");
+    println!("Nacos configuration applied to environment variables");
     Ok(())
 }
