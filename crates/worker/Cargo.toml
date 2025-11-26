@@ -12,6 +12,7 @@ tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
 dotenvy = { workspace = true }
+nacos_config = { path = "../nacos_config" }
 
 # 统一使用 SSH git 源作为基础声明
 conf = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", default-features = false, features = [
