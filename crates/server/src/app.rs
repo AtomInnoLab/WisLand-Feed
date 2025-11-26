@@ -4,6 +4,7 @@ use crate::{
         // feed::{self},
         feed::feed_routers,
         health::{self, handler_404},
+        internal::internal_routers,
     },
     state::app_state::AppState,
 };
@@ -42,6 +43,7 @@ pub async fn build_app() -> Result<(Router, AppState), ApiError> {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest(url_prefix, health::health_routers())
         .nest(url_prefix, feed_routers())
+        .nest(url_prefix, internal_routers())
         .split_for_parts();
 
     // build the final router with Swagger UI and Scalar documentation
