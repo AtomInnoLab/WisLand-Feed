@@ -1,4 +1,4 @@
-use crate::{middlewares::auth::User, model::base::ApiResponse, state::app_state::AppState};
+use crate::{model::base::ApiResponse, state::app_state::AppState};
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
 use seaorm_db::query::feed::{
@@ -33,9 +33,10 @@ Get detail information by paper_id or verification_id.
 - `verification_id` (optional): The ID of the verification to query
 
 ## Behavior
+- **No Authentication Required**: This endpoint does not require authentication tokens
 - If both `paper_id` and `verification_id` are provided, `verification_id` takes priority
-- If only `paper_id` is provided: Returns `RssPaperDataWithDetail`
-- If only `verification_id` is provided: Returns `PaperVerificationWithDetail`
+- If only `paper_id` is provided: Returns paper detail with `verification: null`
+- If only `verification_id` is provided: Returns paper detail with verification information
 - If neither is provided: Returns 400 Bad Request
 
 ## Returns
@@ -49,7 +50,6 @@ Returns `InternalDetailResponse` with:
     ),
     responses(
         (status = 200, body = InternalDetailResponse, description = "Successfully retrieved detail"),
-        (status = 401, description = "Unauthorized"),
         (status = 404, description = "Not found"),
         (status = 500, description = "Database error"),
     ),
@@ -57,7 +57,6 @@ Returns `InternalDetailResponse` with:
 )]
 pub async fn get_detail(
     State(state): State<AppState>,
-    User(_user): User,
     Query(params): Query<InternalDetailRequest>,
 ) -> Result<ApiResponse<InternalDetailResponse>, ApiError> {
     tracing::info!(
