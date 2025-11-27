@@ -8,6 +8,9 @@ use utoipa::ToSchema;
 use crate::consts::{WIS_TOKEN, WIS_TOKEN_LOWERCASE};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UserBenefit(String);
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserInfo {
     pub id: i64,
     pub open_id: String,
@@ -28,6 +31,7 @@ pub struct UserInfo {
     pub phone_number: Option<String>,
     pub phone_number_verified: Option<bool>,
     pub address: Option<String>,
+    pub benefit: Option<UserBenefit>,
 }
 
 pub struct User(pub UserInfo);
