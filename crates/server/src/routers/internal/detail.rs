@@ -2,7 +2,8 @@ use crate::{model::base::ApiResponse, state::app_state::AppState};
 use axum::extract::{Query, State};
 use common::{error::api_error::*, prelude::ApiCode};
 use seaorm_db::query::feed::{
-    rss_papers::RssPapersQuery, user_paper_verifications::UserPaperVerificationsQuery,
+    rss_papers::{RssPaperDataWithDetail, RssPapersQuery},
+    user_paper_verifications::{UserPaperVerificationsQuery, VerificationWithDetails},
 };
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -16,9 +17,8 @@ pub struct InternalDetailRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct InternalDetailResponse {
-    pub paper: seaorm_db::query::feed::rss_papers::RssPaperDataWithDetail,
-    pub verification:
-        Option<seaorm_db::query::feed::user_paper_verifications::VerificationWithDetails>,
+    pub paper: RssPaperDataWithDetail,
+    pub verification: Option<VerificationWithDetails>,
 }
 
 #[utoipa::path(
