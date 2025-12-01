@@ -64,3 +64,4 @@ feed = { git = "ssh://git@github.com/AtomInnoLab/WisAgent.git", branch = "dev", 
     "redis",
     "cloud",
 ] }
+base64 = { workspace = true }
