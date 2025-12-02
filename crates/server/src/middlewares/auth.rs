@@ -1,36 +1,75 @@
+use std::ops::Deref;
+
 use axum::extract::FromRequestParts;
-use common::{error::api_error::*, prelude::ApiCode};
+use base64::{Engine, engine::general_purpose};
+use common::{
+    error::api_error::{ApiError, SerializeSnafu},
+    prelude::ApiCode,
+};
 use serde::{Deserialize, Serialize};
-use snafu::ResultExt;
 use tracing::info;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
-use crate::consts::{WIS_TOKEN, WIS_TOKEN_LOWERCASE};
+use snafu::ResultExt;
+pub struct User(pub UserInfo);
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct UserInfo {
-    pub id: i64,
-    pub open_id: String,
-    pub name: Option<String>,
-    pub given_name: Option<String>,
-    pub family_name: Option<String>,
-    pub nickname: Option<String>,
-    pub preferred_username: Option<String>,
-    pub profile: Option<String>,
-    pub picture: Option<String>,
-    pub website: Option<String>,
-    pub email: Option<String>,
-    pub email_verified: Option<bool>,
-    pub gender: Option<String>,
-    pub birthdate: Option<String>,
-    pub zoneinfo: Option<String>,
-    pub locale: Option<String>,
-    pub phone_number: Option<String>,
-    pub phone_number_verified: Option<bool>,
-    pub address: Option<String>,
+impl Deref for User {
+    type Target = UserInfo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-pub struct User(pub UserInfo);
+#[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UserInfo {
+    #[serde(rename = "user_id", alias = "id")]
+    pub id: i64,
+    #[serde(default)]
+    pub system_admin: bool,
+    #[serde(default)]
+    pub visitor_id: Option<Uuid>,
+
+    /// using on website
+    pub open_id: Option<String>,
+    pub benefit: Option<UserBenefit>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserBenefit {
+    #[default]
+    Free,
+    Plus,
+    Pro,
+}
+
+impl UserInfo {
+    #[inline(always)]
+    pub fn admin_user(id: i64) -> Self {
+        Self::normal_user(id, true)
+    }
+
+    #[inline(always)]
+    pub fn normal_user(id: i64, admin: bool) -> Self {
+        UserInfo {
+            id,
+            system_admin: admin,
+            ..Default::default()
+        }
+    }
+
+    pub fn is_free(&self) -> bool {
+        self.benefit
+            .is_none_or(|benefit| matches!(benefit, UserBenefit::Free))
+    }
+}
+
+pub const WIS_USER_INFO: &str = "Wis-User-Info";
+pub const WIS_USER_INFO_LOWERCASE: &str = "wis-user-info";
+pub const WIS_TOKEN: &str = "X-User-Info";
+pub const WIS_TOKEN_LOWERCASE: &str = "x-user-info";
 
 impl<S> FromRequestParts<S> for User {
     type Rejection = ApiError;
@@ -40,8 +79,11 @@ impl<S> FromRequestParts<S> for User {
         _state: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         let headers = &mut parts.headers;
+
         let wis_token = headers
-            .remove(WIS_TOKEN)
+            .remove(WIS_USER_INFO)
+            .or_else(|| headers.remove(WIS_USER_INFO_LOWERCASE))
+            .or_else(|| headers.remove(WIS_TOKEN))
             .or_else(|| headers.remove(WIS_TOKEN_LOWERCASE));
 
         async move {
@@ -56,12 +98,20 @@ impl<S> FromRequestParts<S> for User {
                 });
             };
 
-            serde_json::from_str::<UserInfo>(user)
-                .context(SerializeSnafu {
-                    stage: "deserialize-auth-user",
-                    code: ApiCode::INVALID_AUTH_PAYLOAD,
-                })
-                .map(User)
+            match general_purpose::STANDARD.decode(user) {
+                Ok(json_bytes) => serde_json::from_slice::<UserInfo>(&json_bytes)
+                    .context(SerializeSnafu {
+                        stage: "deserialize-auth-user",
+                        code: ApiCode::INVALID_AUTH_PAYLOAD,
+                    })
+                    .map(User),
+                Err(_) => serde_json::from_str::<UserInfo>(user)
+                    .context(SerializeSnafu {
+                        stage: "deserialize-auth-user",
+                        code: ApiCode::INVALID_AUTH_PAYLOAD,
+                    })
+                    .map(User),
+            }
         }
     }
 }
