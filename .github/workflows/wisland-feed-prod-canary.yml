@@ -125,6 +125,7 @@ jobs:
           name: docker_tag
           path: docker_tag.txt
           retention-days: 7
+          overwrite: true
 
       - name: Verify docker_tag consistency
         run: |
