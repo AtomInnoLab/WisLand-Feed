@@ -1,0 +1,170 @@
+name: wisland-feed-prod-canary
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  KUBECTL_VERSION: v1.32.2
+  NAMESPACE: prod-ns
+  REPO_NS: mxrag
+  DEPLOYMENT: wisland-feed-prod
+
+  REPO: ${{ secrets.ALI_DOCKER_REGISTRY }}
+  REPO_USER: ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }}
+  REPO_PASSWD: ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }}
+  FEISHU_WEBHOOK_URL_PROD: ${{ secrets.FEISHU_WEBHOOK_URL_PROD }}
+  KUBECONFIG_PROD: ${{ secrets.KUBECONFIG_PROD }}
+
+jobs:
+  build_and_push:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
+    name: build_and_push
+    permissions:
+      contents: write
+    runs-on: [ubuntu-22.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+
+      - name: Install Rust-stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          override: true
+
+      - name: Set proxy
+        run: |
+          rm -rf ~/.gitconfig || true
+          git config --global url."https://${{ secrets.GH_ACCESS_TOKEN }}@github.com".insteadOf ssh://git@github.com
+          git config --global credential.helper store
+
+      - name: Building
+        shell: bash
+        run: cargo build -r
+
+      - name: Generate Docker Tag
+        id: docker_tag
+        run: |
+          datetime_now=$(TZ='Asia/Shanghai' date "+%Y%m%d%H%M%S")
+          echo "DOCKER_TAG=${datetime_now}" >> $GITHUB_ENV
+          echo "tag=${datetime_now}" >> $GITHUB_OUTPUT
+
+      - name: Log in to Aliyun ACR
+        run: |
+          docker login \
+            -u ${{ env.REPO_USER }} \
+            -p ${{ env.REPO_PASSWD }} \
+            ${{ env.REPO }}
+
+      - name: Build and Push Docker Image
+        run: |
+          sudo apt-get update && sudo apt-get install -y retry
+          docker build --build-arg APP_PROFILE=prod -f Dockerfile.server -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }} .
+          docker build --build-arg APP_PROFILE=prod -f Dockerfile.worker -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }} .
+          retry -t 5 -- docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }}
+          retry -t 5 -- docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }}
+
+      - name: Set DOCKER_TAG_SERVER and DOCKER_TAG_WORKER for next job
+        run: |
+          echo "Image built: ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:${{ env.DOCKER_TAG }}"
+    outputs:
+      docker_tag: ${{ steps.docker_tag.outputs.tag }}
+
+  deploy_canary:
+    needs: build_and_push
+    name: deploy_canary
+    permissions:
+      contents: write
+    runs-on: [ubuntu-22.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+
+      - name: Setup kubectl
+        uses: ./.github/actions/setup-kubectl-ack
+        with:
+          kubectl-version: ${{ env.KUBECTL_VERSION }}
+          kubeconfig-env: ${{ env.KUBECONFIG_PROD }}
+
+      - name: Apply canary
+        shell: bash
+        run: |
+          IMAGE_SERVER="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ needs.build_and_push.outputs.docker_tag }}"
+          IMAGE_WORKER="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ needs.build_and_push.outputs.docker_tag }}"
+          kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary --ignore-not-found=true
+          kubectl -n "${{ env.NAMESPACE }}" set image \
+            -f k8s/canary/deployment-canary.yml \
+            ${{ env.DEPLOYMENT }}-canary-server="$IMAGE_SERVER" \
+            ${{ env.DEPLOYMENT }}-canary-worker="$IMAGE_WORKER" \
+            --local -o yaml \
+          | kubectl -n "${{ env.NAMESPACE }}" apply -f -
+          kubectl -n "${{ env.NAMESPACE }}" apply  -f k8s/canary/service-canary.yml
+          kubectl -n "${{ env.NAMESPACE }}" apply  -f k8s/canary/ingress-canary.yaml
+          kubectl -n "${{ env.NAMESPACE }}" rollout status "deployment/${{ env.DEPLOYMENT }}-canary" --timeout=180s
+
+      - name: Save docker_tag to artifact
+        run: |
+          echo "${{ needs.build_and_push.outputs.docker_tag }}" > docker_tag.txt
+
+      - name: Upload docker_tag artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker_tag
+          path: docker_tag.txt
+          retention-days: 7
+
+      - name: Verify docker_tag consistency
+        run: |
+          EXPECTED_TAG="${{ needs.build_and_push.outputs.docker_tag }}"
+          ACTUAL_TAG=$(cat docker_tag.txt | tr -d '\n\r')
+          if [ "$EXPECTED_TAG" != "$ACTUAL_TAG" ]; then echo "❌ docker_tag 不一致"; exit 1; fi
+
+      - name: Notify Feishu - canary
+        uses: ./.github/actions/send-feishu-v2
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD }}
+          status-emoji: "🟡"
+          title: "ACK: ${{ env.DEPLOYMENT }}-canary deployed"
+          details: |
+            分支: ${{ github.ref_name }}
+            提交: ${{ github.sha }}
+            Tag: ${{ needs.build_and_push.outputs.docker_tag }}
+            测试方法：在header 中添加 X-Canary: grey
+            测试地址: https://wisland-feed-canary.atominnolab.com
+
+            🚀 生产发布: https://github.com/${{ github.repository }}/actions/workflows/wisland-feed-prod-release.yml
+
+  notify_docker_tag_mismatch:
+    name: notify_docker_tag_mismatch
+    needs: [build_and_push, deploy_canary]
+    if: always() && needs.deploy_canary.result == 'failure'
+    runs-on: [ubuntu-22.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+
+      - name: Notify Feishu - docker_tag mismatch
+        uses: ./.github/actions/send-feishu-v2
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD }}
+          status-emoji: "🔴"
+          title: "ACK: ${{ env.DEPLOYMENT }}-canary docker_tag 验证失败"
+          details: |
+            分支: ${{ github.ref_name }}
+            提交: ${{ github.sha }}
+            ❌ docker_tag 验证失败！

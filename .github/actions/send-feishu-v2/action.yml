@@ -1,0 +1,41 @@
+name: Send Feishu Message V2
+description: Send a message to Feishu group (supports multiline format)
+inputs:
+  title:
+    required: true
+  details:
+    required: true
+  status-emoji:
+    default: "ℹ️"
+  webhook:
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send to Feishu
+      shell: bash
+      env:
+        WEBHOOK: ${{ inputs.webhook }}
+      run: |
+        details="${{ inputs.details }}"
+        # 处理多行格式：先将换行符转换为 \n，再处理 %0A
+        # 使用 awk 处理多行，然后 sed 处理 %0A
+        details_formatted=$(printf '%s' "$details" | awk '{if(NR>1) printf "\\n"; printf "%s", $0}' | sed 's/%0A/\\n/g')
+        PAYLOAD=$(cat << EOF
+        {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "${{ inputs.title }} ${{ inputs.status-emoji }}",
+                "content": [
+                  [{ "tag": "text", "text": "$details_formatted" }]
+                ]
+              }
+            }
+          }
+        }
+        EOF
+        )
+        curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK"
