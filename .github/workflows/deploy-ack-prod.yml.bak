@@ -88,7 +88,10 @@ jobs:
       contents: write
     runs-on: [ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
       - name: Setup kubectl
         uses: ./.github/actions/setup-kubectl-ack
