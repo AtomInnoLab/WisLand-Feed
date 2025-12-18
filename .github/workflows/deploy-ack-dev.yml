@@ -1,15 +1,13 @@
-name: deploy_ali_ack-dev
+name: dev
 
 on:
-  push:
-    branches: [dev]
   pull_request_target:
     branches: [dev]
     types: [closed]
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -27,12 +25,7 @@ env:
 
 jobs:
   deploy_to_dev:
-    # 仅在以下情况运行：
-    # 1. push 到 dev（github.event_name == 'push'）
-    # 2. PR 合并到 dev（github.event_name == 'pull_request_target' 且 merged == true）
-    # 3. 手动触发（github.event_name == 'workflow_dispatch'）
     if: |
-      github.event_name == 'push' ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) ||
       github.event_name == 'workflow_dispatch'
     name: build_and_push
@@ -40,7 +33,10 @@ jobs:
       contents: write
     runs-on: [ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
       - name: Install Rust-stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -105,7 +101,10 @@ jobs:
     if: always() && needs.deploy_to_dev.result == 'failure'
     runs-on: [ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
       
       - name: Notify Feishu - failed
         uses: ./.github/actions/send-feishu

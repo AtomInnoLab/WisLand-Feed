@@ -1,4 +1,4 @@
-name: deploy_ali_ack-pre
+name: pre
 on:
   pull_request_target:
     branches: [pre]
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -32,7 +32,10 @@ jobs:
       contents: write
     runs-on: [ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
       - name: Install Rust-stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -97,7 +100,10 @@ jobs:
     if: always() && needs.deploy_to_pre.result == 'failure'
     runs-on: [ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
       
       - name: Notify Feishu - failed
         uses: ./.github/actions/send-feishu
