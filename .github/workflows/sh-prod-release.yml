@@ -1,0 +1,193 @@
+name: sh-prod-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      approve:
+        description: '选择操作'
+        required: true
+        type: choice
+        options:
+          - '无操作'
+          - '发布'
+          - '取消'
+        default: '无操作'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  KUBECTL_VERSION: v1.32.2
+  NAMESPACE: shprod
+  REPO_NS: mxrag
+  REPO_APP: wisland-feed-prod
+  DEPLOYMENT: wisland-feed-prod
+
+  REPO: ${{ secrets.ALI_DOCKER_REGISTRY }}
+  REPO_USER: ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }}
+  REPO_PASSWD: ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }}
+  FEISHU_WEBHOOK_URL_PROD_SH: ${{ secrets.FEISHU_WEBHOOK_URL_PROD_SH }}
+  KUBECONFIG_PROD_SH: ${{ secrets.KUBECONFIG_PROD_SH }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  show_operation:
+    name: Operation - ${{ github.event.inputs.approve }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Display operation
+        run: |
+          OPERATION="${{ github.event.inputs.approve }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  📋 操作类型: $OPERATION"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          case "$OPERATION" in
+            "发布")
+              echo "  ✅ 将执行: 获取 tag → 发布到生产环境 → 清理 canary"
+              ;;
+            "取消")
+              echo "  🔵 将执行: 清理 canary 资源"
+              ;;
+            "无操作")
+              echo "  ℹ️  将执行: 无操作"
+              ;;
+          esac
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  get_tag:
+    name: get_tag
+    if: github.event.inputs.approve == '发布'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+
+      - name: Get docker tag from canary workflow
+        id: get_docker_tag
+        uses: ./.github/actions/get-docker-tag
+        with:
+          workflow: sh-prod-canary.yml
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      docker_tag: ${{ steps.get_docker_tag.outputs.docker_tag }}
+      run_id: ${{ steps.get_docker_tag.outputs.run_id }}
+      run_url: ${{ steps.get_docker_tag.outputs.run_url }}
+
+  release:
+    if: github.event.inputs.approve == '发布'
+    needs: [get_tag]
+    name: release
+    runs-on: [ubuntu-22.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+
+      - name: Setup kubectl
+        uses: ./.github/actions/setup-kubectl-ack
+        with:
+          kubectl-version: ${{ env.KUBECTL_VERSION }}
+          kubeconfig-env: ${{ env.KUBECONFIG_PROD_SH }}
+
+      - name: Verify and set docker_tag
+        run: |
+          DOCKER_TAG="${{ needs.get_tag.outputs.docker_tag }}"
+          if [ -z "$DOCKER_TAG" ]; then echo "❌ 无法获取 docker_tag"; exit 1; fi
+          CANARY_SERVER_IMAGE=$(kubectl -n "${{ env.NAMESPACE }}" get deployment "${{ env.DEPLOYMENT }}-canary" -o jsonpath='{.spec.template.spec.containers[?(@.name=="'${{ env.DEPLOYMENT }}-canary-server")].image}' 2>/dev/null || echo "")
+          if [ -n "$CANARY_SERVER_IMAGE" ]; then
+            CANARY_TAG=$(echo "$CANARY_SERVER_IMAGE" | sed 's/.*:server-//')
+            if [ "$DOCKER_TAG" != "$CANARY_TAG" ]; then echo "❌ docker_tag 不一致"; exit 1; fi
+          fi
+
+      - name: Update
+        run: |
+          kubectl -n "${{ env.NAMESPACE }}" set image deployment/${{ env.DEPLOYMENT }} \
+            ${{ env.DEPLOYMENT }}-server=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ needs.get_tag.outputs.docker_tag }} \
+            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ needs.get_tag.outputs.docker_tag }}
+          kubectl -n "${{ env.NAMESPACE }}" rollout status deployment/${{ env.DEPLOYMENT }} --timeout=600s
+
+  delete_canary:
+    name: delete_canary
+    needs: [get_tag, release]
+    if: always() && (github.event.inputs.approve == '发布' || github.event.inputs.approve == '取消')
+    runs-on: [ubuntu-22.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+      - name: Setup kubectl
+        uses: ./.github/actions/setup-kubectl-ack
+        with:
+          kubectl-version: ${{ env.KUBECTL_VERSION }}
+          kubeconfig-env: ${{ env.KUBECONFIG_PROD_SH }}
+      - name: Delete canary resources
+        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/shanghai/canary/ --ignore-not-found=true
+
+  notify:
+    name: notify
+    needs: [get_tag, release, delete_canary]
+    if: always() && (github.event.inputs.approve == '发布' || github.event.inputs.approve == '取消')
+    runs-on: [ubuntu-22.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+      
+      - name: Notify Feishu
+        id: notify
+        run: |
+          BASE="分支: ${{ github.ref_name }}\n提交: ${{ github.sha }}"
+          REPO="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}"
+          RUN_LINK="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          if [ "${{ github.event.inputs.approve }}" == "发布" ]; then
+            if [ "${{ needs.get_tag.result }}" == "failure" ]; then
+              EMOJI="🔴" TITLE="ACK: ${{ env.DEPLOYMENT }} - get_tag failed"
+              DETAILS="${BASE}\n运行日志: ${RUN_LINK}"
+            else
+              if [ "${{ needs.release.result }}" == "success" ]; then
+                EMOJI="🟢" TITLE="ACK: ${{ env.DEPLOYMENT }} - released"
+                DETAILS="${BASE}\nTag: ${{ needs.get_tag.outputs.docker_tag }}"
+              else
+                EMOJI="🔴" TITLE="ACK: ${{ env.DEPLOYMENT }} - release failed"
+                DETAILS="${BASE}\n运行日志: ${RUN_LINK}"
+              fi
+            fi
+          elif [ "${{ github.event.inputs.approve }}" == "取消" ]; then
+            if [ "${{ needs.delete_canary.result }}" == "success" ] || [ "${{ needs.delete_canary.result }}" == "skipped" ]; then
+              EMOJI="🔵" TITLE="ACK: ${{ env.DEPLOYMENT }} - cancelled"
+              DETAILS="${BASE}"
+            else
+              EMOJI="🔴" TITLE="ACK: ${{ env.DEPLOYMENT }} - delete_canary failed"
+              DETAILS="${BASE}\n运行日志: ${RUN_LINK}"
+            fi
+          else
+            EMOJI="ℹ️" TITLE="ACK: ${{ env.DEPLOYMENT }} - skipped"
+            DETAILS="${BASE}\n\nℹ️ 未执行任何操作"
+          fi
+          
+          {
+            echo "emoji=${EMOJI}"
+            echo "title=${TITLE}"
+            echo "details<<EOF"
+            printf "${DETAILS}\n"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Send notification
+        uses: ./.github/actions/send-feishu-v2
+        with:
+          webhook: ${{ env.FEISHU_WEBHOOK_URL_PROD_SH }}
+          status-emoji: ${{ steps.notify.outputs.emoji }}
+          title: ${{ steps.notify.outputs.title }}
+          details: ${{ steps.notify.outputs.details }}

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+  name: wisland-feed-prod-service-canary
+  namespace: shprod
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: tcp3500
+      port: 3500
+      protocol: TCP
+      targetPort: 3500
+  selector:
+    app: wisland-feed-prod-canary
+    version: v2
+  sessionAffinity: None
+  type: ClusterIP
