@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/canary: 'true'
+    alb.ingress.kubernetes.io/canary-by-header: X-Canary
+    alb.ingress.kubernetes.io/canary-by-header-value: grey
+    alb.ingress.kubernetes.io/order: '1'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},{"HTTPS": 443}]'
+  labels:
+    ingress-controller: alb
+  name: wisland-feed-prod-ingress-canary
+  namespace: shprod
+spec:
+  ingressClassName: alb
+  rules:
+    - host: wisland-feed.qiewenpaper.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: &default-backend
+              service:
+                name: wisland-feed-prod-service-canary
+                port:
+                  number: 3500
+  tls:
+    - hosts:
+        - wisland-feed.qiewenpaper.com
+      secretName: tls-qiewenpaper.com

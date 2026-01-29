@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wisland-feed-prod
+  namespace: shprod
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: wisland-feed-prod
+      version: v1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: wisland-feed-prod
+        version: v1
+    spec:
+      imagePullSecrets:
+        - name: registry-ali-hangzhou
+      containers:
+        - name: wisland-feed-prod-server
+          image: >-
+            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20251021093417
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: aliyun_logs_wisland-feed-server-prod
+              value: stdout
+            - name: ENVIRONMENT
+              value: prod
+            - name: NACOS_ENDPOINT
+              value: 'mse-886eff00-nacos-ans.mse.aliyuncs.com:8848'
+            - name: NACOS_NAMESPACE
+              value: '3f36bb60-6861-4fad-a057-9bb6d9a4e51d'
+            - name: SITE
+              value: cn
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 3500
+            timeoutSeconds: 5
+          ports:
+            - containerPort: 3500
+              protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            successThreshold: 1
+            tcpSocket:
+              port: 3500
+            timeoutSeconds: 3
+          resources:
+            limits:
+              cpu: 2
+              memory: 1Gi
+            requests:
+              cpu: 0.1
+              memory: 100Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-prod
+              subPath: .env
+
+        - name: wisland-feed-prod-worker
+          image: >-
+            crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20251021093417
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: aliyun_logs_wisland-feed-worker-prod
+              value: stdout
+            - name: ENVIRONMENT
+              value: prod
+            - name: NACOS_ENDPOINT
+              value: 'mse-886eff00-nacos-ans.mse.aliyuncs.com:8848'
+            - name: NACOS_NAMESPACE
+              value: '3f36bb60-6861-4fad-a057-9bb6d9a4e51d'
+            - name: SITE
+              value: cn
+          resources:
+            limits:
+              cpu: 2
+              memory: 1Gi
+            requests:
+              cpu: 0.1
+              memory: 100Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/.env
+              name: volume-wisland-feed-prod
+              subPath: .env
+
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 120
+      volumes:
+        - name: volume-wisland-feed-prod
+          secret:
+            defaultMode: 420
+            secretName: wisland-feed-prod
