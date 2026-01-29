@@ -8,6 +8,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(err) = load_env_from_nacos(".env", "wisland-feed", "wisland-feed").await {
         eprintln!("failed to load env from nacos: {err}");
     }
+    // Force disable database migration for worker
+    // SAFETY: This is called at the very beginning of the application startup,
+    // before any other threads are spawned that might access the environment.
+    unsafe {
+        std::env::set_var("APP_DATABASE.ALLOW_MIGRATE", "false");
+    }
+
     // Load configuration and output key startup information
     let cfg = app_config();
     info!(target: "feed", redis_prefix = %cfg.rss.feed_redis.redis_prefix, "Starting feed workers"); // Initialize logging
