@@ -27,7 +27,7 @@ spec:
             - name: NACOS_ENDPOINT
               value: mse-886eff00-nacos-ans.mse.aliyuncs.com:8848
             - name: NACOS_NAMESPACE
-              value: 51c50bd1-e6fc-424b-b8a8-9c103c658c68
+              value: 3f36bb60-6861-4fad-a057-9bb6d9a4e51d
             - name: NACOS_ENABLE
               value: "true"
             - name: APP_PROFILE
