@@ -101,7 +101,8 @@ jobs:
         run: |
           DOCKER_TAG="${{ needs.get_tag.outputs.docker_tag }}"
           if [ -z "$DOCKER_TAG" ]; then echo "❌ 无法获取 docker_tag"; exit 1; fi
-          CANARY_SERVER_IMAGE=$(kubectl -n "${{ env.NAMESPACE }}" get deployment "${{ env.DEPLOYMENT }}-canary" -o jsonpath='{.spec.template.spec.containers[?(@.name=="'${{ env.DEPLOYMENT }}-canary-server")].image}' 2>/dev/null || echo "")
+          CONTAINER_SERVER="${{ env.DEPLOYMENT }}-canary-server"
+          CANARY_SERVER_IMAGE=$(kubectl -n "${{ env.NAMESPACE }}" get deployment "${{ env.DEPLOYMENT }}-canary" -o jsonpath='{.spec.template.spec.containers[?(@.name=="'"$CONTAINER_SERVER"'")].image}' 2>/dev/null || echo "")
           if [ -n "$CANARY_SERVER_IMAGE" ]; then
             CANARY_TAG=$(echo "$CANARY_SERVER_IMAGE" | sed 's/.*:server-//')
             if [ "$DOCKER_TAG" != "$CANARY_TAG" ]; then echo "❌ docker_tag 不一致"; exit 1; fi
