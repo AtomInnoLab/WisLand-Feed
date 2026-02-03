@@ -914,6 +914,7 @@ dependencies = [
  "unicode-segmentation",
  "utils",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]

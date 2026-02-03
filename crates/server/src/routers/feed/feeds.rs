@@ -975,7 +975,7 @@ pub async fn stream_verify(
     ));
 
     // Start listener in separate task to avoid blocking
-    let mut pubsub_manager = state.redis.pubsub_manager.clone();
+    let pubsub_manager = state.redis.pubsub_manager.clone();
     tokio::spawn(async move {
         pubsub_manager.add_listener(handler).await;
     });
