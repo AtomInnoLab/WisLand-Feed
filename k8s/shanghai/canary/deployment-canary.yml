@@ -15,8 +15,6 @@ spec:
         app: wisland-feed-prod-canary
         version: v2
     spec:
-      imagePullSecrets:
-        - name: registry-ali-hangzhou
       containers:
         - name: wisland-feed-prod-canary-server
           image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20250920142148
@@ -44,8 +42,8 @@ spec:
               cpu: 2
               memory: 1Gi
             requests:
-              cpu: 0.1
-              memory: 100Mi
+              cpu: 2
+              memory: 1Gi
           livenessProbe:
             tcpSocket:
               port: 3500
@@ -85,12 +83,18 @@ spec:
               cpu: 2
               memory: 1Gi
             requests:
-              cpu: 0.1
-              memory: 100Mi
+              cpu: 2
+              memory: 1Gi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
 
       dnsPolicy: ClusterFirst
+      nodeSelector:
+        type: virtual-kubelet
       restartPolicy: Always
+      tolerations:
+        - effect: NoSchedule
+          key: virtual-kubelet.io/provider
+          operator: Exists
       schedulerName: default-scheduler
       terminationGracePeriodSeconds: 120
