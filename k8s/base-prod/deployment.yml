@@ -84,8 +84,6 @@ spec:
               name: volume-wisland-feed-prod
               subPath: .env
       dnsPolicy: ClusterFirst
-      nodeSelector:
-        type: virtual-kubelet
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
@@ -102,10 +100,15 @@ spec:
                   values:
                   - wisland-feed-prod
               topologyKey: kubernetes.io/hostname
-      tolerations:
-        - effect: NoSchedule
-          key: virtual-kubelet.io/provider
-          operator: Exists
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - wisland-feed-prod
+              topologyKey: topology.kubernetes.io/zone
       volumes:
         - name: volume-wisland-feed-prod
           secret:

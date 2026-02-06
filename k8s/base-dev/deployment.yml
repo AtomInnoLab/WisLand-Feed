@@ -78,26 +78,10 @@ spec:
               subPath: .env
 
       dnsPolicy: ClusterFirst
-      nodeSelector:
-        type: virtual-kubelet
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
       terminationGracePeriodSeconds: 120
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - wisland-feed-dev
-            topologyKey: topology.kubernetes.io/zone
-      tolerations:
-        - effect: NoSchedule
-          key: virtual-kubelet.io/provider
-          operator: Exists
       volumes:
         - name: volume-wisland-feed-dev
           secret:
