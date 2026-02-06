@@ -23,6 +23,8 @@ spec:
         app: wisland-feed-prod
         version: v1
     spec:
+      imagePullSecrets:
+        - name: registry-ali-hangzhou
       containers:
         - env:
             - name: aliyun_logs_wisland-feed-server-prod
@@ -55,8 +57,8 @@ spec:
               cpu: '2'
               memory: 2Gi
             requests:
-              cpu: '2'
-              memory: 2Gi
+              cpu: 100m
+              memory: 100Mi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           volumeMounts:
@@ -75,8 +77,8 @@ spec:
               cpu: 2
               memory: 2Gi
             requests:
-              cpu: 2
-              memory: 2Gi
+              cpu: 100m
+              memory: 100Mi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           volumeMounts:
@@ -84,8 +86,6 @@ spec:
               name: volume-wisland-feed-prod
               subPath: .env
       dnsPolicy: ClusterFirst
-      nodeSelector:
-        type: virtual-kubelet
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
@@ -102,10 +102,15 @@ spec:
                   values:
                   - wisland-feed-prod
               topologyKey: kubernetes.io/hostname
-      tolerations:
-        - effect: NoSchedule
-          key: virtual-kubelet.io/provider
-          operator: Exists
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - wisland-feed-prod
+              topologyKey: topology.kubernetes.io/zone
       volumes:
         - name: volume-wisland-feed-prod
           secret:

@@ -65,7 +65,7 @@ spec:
               cpu: 2
               memory: 1Gi
             requests:
-              cpu: 0.1
+              cpu: 100m
               memory: 100Mi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
@@ -90,7 +90,7 @@ spec:
               cpu: 2
               memory: 1Gi
             requests:
-              cpu: 0.1
+              cpu: 100m
               memory: 100Mi
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
@@ -100,3 +100,24 @@ spec:
       schedulerName: default-scheduler
       securityContext: {}
       terminationGracePeriodSeconds: 120
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - wisland-feed-prod
+              topologyKey: kubernetes.io/hostname
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - wisland-feed-prod
+              topologyKey: topology.kubernetes.io/zone
