@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: prod-ns
+  namespace: shprod
   name: wisland-feed-prod-canary
 spec:
   replicas: 1
@@ -21,16 +21,27 @@ spec:
         - name: wisland-feed-prod-canary-server
           image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20250920142148
           imagePullPolicy: IfNotPresent
+          env:
+            - name: ENVIRONMENT
+              value: prod
+            - name: NACOS_ENDPOINT
+              value: mse-886eff00-nacos-ans.mse.aliyuncs.com:8848
+            - name: NACOS_NAMESPACE
+              value: 3f36bb60-6861-4fad-a057-9bb6d9a4e51d
+            - name: NACOS_ENABLE
+              value: "true"
+            - name: APP_PROFILE
+              value: prod
+            - name: aliyun_logs_wisland-feed-prod-canary-server
+              value: stdout
+            - name: SITE
+              value: cn
           ports:
             - containerPort: 3500
               protocol: TCP
-          volumeMounts:
-            - mountPath: /app/.env
-              name: volume-wisland-feed-prod
-              subPath: .env
           resources:
             limits:
-              cpu: '0.5'
+              cpu: 2
               memory: 1Gi
             requests:
               cpu: 100m
@@ -50,26 +61,36 @@ spec:
             timeoutSeconds: 3
             successThreshold: 1
             failureThreshold: 3
+
         - name: wisland-feed-prod-canary-worker
           image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20250920142148
           imagePullPolicy: IfNotPresent
-          volumeMounts:
-            - mountPath: /app/.env
-              name: volume-wisland-feed-prod
-              subPath: .env
+          env:
+            - name: ENVIRONMENT
+              value: prod
+            - name: NACOS_ENDPOINT
+              value: mse-886eff00-nacos-ans.mse.aliyuncs.com:8848
+            - name: NACOS_NAMESPACE
+              value: 3f36bb60-6861-4fad-a057-9bb6d9a4e51d
+            - name: NACOS_ENABLE
+              value: "true"
+            - name: APP_PROFILE
+              value: prod
+            - name: aliyun_logs_wisland-feed-prod-canary-worker
+              value: stdout
+            - name: SITE
+              value: cn
           resources:
             limits:
-              cpu: '0.5'
+              cpu: 2
               memory: 1Gi
             requests:
               cpu: 100m
               memory: 100Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       schedulerName: default-scheduler
       terminationGracePeriodSeconds: 120
-      volumes:
-        - name: volume-wisland-feed-prod
-          secret:
-            defaultMode: 420
-            secretName: wisland-feed-prod
