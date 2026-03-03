@@ -1,6 +1,9 @@
 name: sh-prod-canary
 
 on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
   workflow_dispatch:
 
 concurrency:
