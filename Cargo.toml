@@ -50,7 +50,7 @@ arc-swap = "1"
 figment = { version = "0.10", features = ["env", "toml"] }
 
 # error
-snafu = "0.8"
+snafu = "0.9"
 
 # http
 reqwest = { version = "0.12", default-features = false, features = [
