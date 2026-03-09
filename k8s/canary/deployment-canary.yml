@@ -24,10 +24,6 @@ spec:
           ports:
             - containerPort: 3500
               protocol: TCP
-          volumeMounts:
-            - mountPath: /app/.env
-              name: volume-wisland-feed-prod
-              subPath: .env
           resources:
             limits:
               cpu: '0.5'
@@ -53,10 +49,6 @@ spec:
         - name: wisland-feed-prod-canary-worker
           image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20250920142148
           imagePullPolicy: IfNotPresent
-          volumeMounts:
-            - mountPath: /app/.env
-              name: volume-wisland-feed-prod
-              subPath: .env
           resources:
             limits:
               cpu: '0.5'
@@ -68,8 +60,3 @@ spec:
       restartPolicy: Always
       schedulerName: default-scheduler
       terminationGracePeriodSeconds: 120
-      volumes:
-        - name: volume-wisland-feed-prod
-          secret:
-            defaultMode: 420
-            secretName: wisland-feed-prod
