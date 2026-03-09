@@ -31,7 +31,9 @@ impl AppState {
                 apalis_conn: apalis_redis::connect(config.rss.feed_redis.url.as_str())
                     .await
                     .expect("Could not connect redis"),
-                pubsub_manager: RedisPubSubManager::new(config.rss.feed_redis.url.as_str()).await,
+                pubsub_manager: RedisPubSubManager::new(config.rss.feed_redis.url.as_str())
+                    .await
+                    .expect("Could not create Redis pubsub manager"),
             },
             config,
         }
