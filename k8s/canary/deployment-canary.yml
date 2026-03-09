@@ -19,6 +19,21 @@ spec:
         - name: registry-ali-hangzhou
       containers:
         - name: wisland-feed-prod-canary-server
+          env:
+            - name: ENVIRONMENT
+              value: prod
+            - name: NACOS_ENDPOINT
+              value: 'mse-c676d9310-nacos-ans.mse.aliyuncs.com:8848'
+            - name: NACOS_NAMESPACE
+              value: 5a7e9e22-07ea-4594-9196-1182f641a55a
+            - name: NACOS_ENABLE
+              value: "true"
+            - name: APP_PROFILE
+              value: prod
+            - name: aliyun_logs_wisland-feed-prod-canary-server
+              value: stdout
+            - name: SITE
+              value: cn
           image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20250920142148
           imagePullPolicy: IfNotPresent
           ports:
@@ -47,6 +62,21 @@ spec:
             successThreshold: 1
             failureThreshold: 3
         - name: wisland-feed-prod-canary-worker
+          env:
+            - name: ENVIRONMENT
+              value: prod
+            - name: NACOS_ENDPOINT
+              value: 'mse-c676d9310-nacos-ans.mse.aliyuncs.com:8848'
+            - name: NACOS_NAMESPACE
+              value: 5a7e9e22-07ea-4594-9196-1182f641a55a
+            - name: NACOS_ENABLE
+              value: "true"
+            - name: APP_PROFILE
+              value: prod
+            - name: aliyun_logs_wisland-feed-prod-canary-worker
+              value: stdout
+            - name: SITE
+              value: cn
           image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20250920142148
           imagePullPolicy: IfNotPresent
           resources:
