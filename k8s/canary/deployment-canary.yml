@@ -16,7 +16,7 @@ spec:
         version: v2
     spec:
       imagePullSecrets:
-        - name: registry-ali-hangzhou
+        - name: registry-ali-sp
       containers:
         - name: wisland-feed-prod-canary-server
           env:
