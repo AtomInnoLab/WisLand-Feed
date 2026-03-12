@@ -20,10 +20,10 @@ concurrency:
 env:
   KUBECTL_VERSION: v1.32.2
   NAMESPACE: prod-ns
-  REPO_NS: mxrag
+  REPO_NS: ${{ secrets.ALICLOUD_ACR_SP_NSPROD }}
   DEPLOYMENT: wisland-feed-prod
 
-  REPO: ${{ secrets.ALI_DOCKER_REGISTRY }}
+  REPO_VPC: ${{ secrets.ALICLOUD_ACR_SP_VPC }}
   REPO_USER: ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }}
   REPO_PASSWD: ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }}
   FEISHU_WEBHOOK_URL_PROD: ${{ secrets.FEISHU_WEBHOOK_URL_PROD }}
@@ -87,8 +87,8 @@ jobs:
         run: |
           kubectl -n "${{ env.NAMESPACE }}" \
             set image deployment/${{ env.DEPLOYMENT }} \
-            ${{ env.DEPLOYMENT }}-server=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ needs.get_tag.outputs.docker_tag }} \
-            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ needs.get_tag.outputs.docker_tag }}
+            ${{ env.DEPLOYMENT }}-server=${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ needs.get_tag.outputs.docker_tag }} \
+            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ needs.get_tag.outputs.docker_tag }}
           kubectl -n "${{ env.NAMESPACE }}" rollout status deployment/${{ env.DEPLOYMENT }} --timeout=180s
 
       - name: Delete canary resources
@@ -138,7 +138,7 @@ jobs:
         id: notify
         run: |
           BASE="分支: ${{ github.ref_name }}\n提交: ${{ github.sha }}"
-          REPO="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}"
+          REPO="${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}"
           RUN_LINK="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           if [ "${{ github.event.inputs.approve }}" == "发布" ]; then

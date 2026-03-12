@@ -1,0 +1,68 @@
+name: Aliyun ACR Docker Login (Token)
+description: Log in to Alibaba Cloud ACR Enterprise with temporary token (GetAuthorizationToken + InstanceId)
+inputs:
+  access-key-id:
+    description: Alibaba Cloud AccessKey ID
+    required: true
+  secret-access-key:
+    description: Alibaba Cloud AccessKey Secret
+    required: true
+  instance-id:
+    description: ACR Enterprise instance ID (e.g. cri-xxx)
+    required: true
+  registry-url:
+    description: Registry login URL (public or VPC), with or without https://
+    required: true
+  region-id:
+    description: CR region, must match the instance
+    required: false
+    default: 'ap-southeast-1'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Aliyun CLI and jq
+      shell: bash
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y jq curl
+        ARCH=$(dpkg --print-architecture)
+        if [ "$ARCH" = "amd64" ]; then
+          curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz -o aliyun.tgz
+        else
+          curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-arm64.tgz -o aliyun.tgz
+        fi
+        tar xzf aliyun.tgz && sudo mv aliyun /usr/local/bin/ && rm -f aliyun.tgz
+        aliyun version
+
+    - name: Get ACR Enterprise temp token and login
+      shell: bash
+      env:
+        ALIYUN_AK: ${{ inputs.access-key-id }}
+        ALIYUN_SK: ${{ inputs.secret-access-key }}
+        ACR_INSTANCE_ID: ${{ inputs.instance-id }}
+        ACR_ENDPOINT: cr.${{ inputs.region-id }}.aliyuncs.com
+        REGISTRY_URL: ${{ inputs.registry-url }}
+      run: |
+        set -e
+        RESP=$(aliyun cr GetAuthorizationToken \
+          --endpoint "$ACR_ENDPOINT" \
+          --InstanceId "$ACR_INSTANCE_ID" \
+          --access-key-id "$ALIYUN_AK" \
+          --access-key-secret "$ALIYUN_SK" 2>&1) || true
+        if [ -z "$RESP" ]; then
+          echo "::error::GetAuthorizationToken failed. Check AK/SK, InstanceId and RAM policy cr:GetAuthorizationToken"
+          exit 1
+        fi
+        TOKEN=$(echo "$RESP" | jq -r '.AuthorizationToken // empty')
+        TEMP_USER=$(echo "$RESP" | jq -r '.TempUsername // empty')
+        if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+          echo "::error::No AuthorizationToken in response: $RESP"
+          exit 1
+        fi
+        USER="${TEMP_USER:-temp_user_cr}"
+        HOST="$REGISTRY_URL"
+        HOST="${HOST#https://}"
+        HOST="${HOST#http://}"
+        echo "$TOKEN" | docker login -u "$USER" --password-stdin "$HOST"
+        echo "Docker logged in to ACR Enterprise"
+
