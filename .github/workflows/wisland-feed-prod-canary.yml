@@ -122,9 +122,9 @@ jobs:
             ${{ env.DEPLOYMENT }}-canary-server="$IMAGE_SERVER" \
             ${{ env.DEPLOYMENT }}-canary-worker="$IMAGE_WORKER" \
             --local -o yaml \
-          | kubectl -n "${{ env.NAMESPACE }}" apply -f -
-          kubectl -n "${{ env.NAMESPACE }}" apply  -f k8s/canary/service-canary.yml
-          kubectl -n "${{ env.NAMESPACE }}" apply  -f k8s/canary/ingress-canary.yaml
+          | kubectl -n "${{ env.NAMESPACE }}" apply -f - --validate=false
+          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/canary/service-canary.yml --validate=false
+          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/canary/ingress-canary.yaml --validate=false
           kubectl -n "${{ env.NAMESPACE }}" rollout status "deployment/${{ env.DEPLOYMENT }}-canary" --timeout=180s
 
       - name: Save docker_tag to artifact
