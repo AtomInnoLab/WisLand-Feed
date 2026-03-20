@@ -24,6 +24,12 @@ spec:
                 name: wisland-feed-prod-service-canary
                 port:
                   number: 3500
+    - host: wisland-feed.qiewen.inner
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: *default-backend
   tls:
     - hosts:
         - wisland-feed.qiewenpaper.com
