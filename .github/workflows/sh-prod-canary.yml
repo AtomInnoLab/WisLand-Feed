@@ -10,6 +10,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: true
 
+# 上海企业版 ACR：REPO_PUB 推送、REPO_VPC 拉取；清单双 imagePullSecret
 env:
   KUBECTL_VERSION: v1.32.2
   NAMESPACE: shprod
@@ -18,7 +19,8 @@ env:
   DEPLOYMENT: wisland-feed-prod
   CANARY_URL: https://wisland-feed.qiewenpaper.com
 
-  REPO: ${{ secrets.ALI_DOCKER_REGISTRY }}
+  REPO_PUB: ${{ secrets.ALICLOUD_ACR_SH_EE_PUBLIC }}
+  REPO_VPC: ${{ secrets.ALICLOUD_ACR_SH_EE_VPC }}
   REPO_USER: ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }}
   REPO_PASSWD: ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }}
   FEISHU_WEBHOOK_URL_PROD_SH: ${{ secrets.FEISHU_WEBHOOK_URL_PROD_SH }}
@@ -65,20 +67,20 @@ jobs:
           docker login \
             -u ${{ env.REPO_USER }} \
             -p ${{ env.REPO_PASSWD }} \
-            ${{ env.REPO }}
+            ${{ env.REPO_PUB }}
 
       - name: Build and Push Docker Image
         run: |
           sudo apt-get update && sudo apt-get install -y retry
-          docker build --build-arg APP_PROFILE=prod -f Dockerfile.server -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }} .
-          docker build --build-arg APP_PROFILE=prod -f Dockerfile.worker -t ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }} .
-          retry -t 5 -- docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }}
-          retry -t 5 -- docker push ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }}
+          docker build --build-arg APP_PROFILE=prod -f Dockerfile.server -t ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }} .
+          docker build --build-arg APP_PROFILE=prod -f Dockerfile.worker -t ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }} .
+          retry -t 5 -- docker push ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }}
+          retry -t 5 -- docker push ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }}
 
       - name: Set DOCKER_TAG for next job
         run: |
-          echo "Image built: ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }}"
-          echo "Image built: ${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }}"
+          echo "Image built: ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }}"
+          echo "Image built: ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }}"
     outputs:
       docker_tag: ${{ steps.docker_tag.outputs.tag }}
 
@@ -103,8 +105,8 @@ jobs:
       - name: Apply canary
         shell: bash
         run: |
-          SERVER_IMAGE="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ needs.build_and_push.outputs.docker_tag }}"
-          WORKER_IMAGE="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ needs.build_and_push.outputs.docker_tag }}"
+          SERVER_IMAGE="${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ needs.build_and_push.outputs.docker_tag }}"
+          WORKER_IMAGE="${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ needs.build_and_push.outputs.docker_tag }}"
           kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary --ignore-not-found=true
           kubectl -n "${{ env.NAMESPACE }}" set image \
             -f k8s/shanghai/canary/deployment-canary.yml \

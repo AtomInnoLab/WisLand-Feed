@@ -24,9 +24,10 @@ spec:
     spec:
       imagePullSecrets:
         - name: registry-ali-hangzhou
+        - name: registry-ali-sh-ee
       containers:
         - name: wisland-feed-pre-server
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/atom-pre/wisland-feed-pre:server-latest
+          image: atom-sh-registry-vpc.cn-shanghai.cr.aliyuncs.com/atom-pre/wisland-feed-pre:server-latest
           imagePullPolicy: IfNotPresent
           env:
             - name: NACOS_ENABLE
@@ -77,7 +78,7 @@ spec:
               subPath: .env
 
         - name: wisland-feed-pre-worker
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/atom-pre/wisland-feed-pre:worker-latest
+          image: atom-sh-registry-vpc.cn-shanghai.cr.aliyuncs.com/atom-pre/wisland-feed-pre:worker-latest
           imagePullPolicy: IfNotPresent
           env:
             - name: NACOS_ENABLE
