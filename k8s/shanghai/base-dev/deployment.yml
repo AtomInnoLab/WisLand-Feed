@@ -25,9 +25,10 @@ spec:
     spec:
       imagePullSecrets:
         - name: registry-ali-hangzhou
+        - name: registry-ali-sh-ee
       containers:
         - name: wisland-feed-dev-server
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:server-20251127152426
+          image: atom-sh-registry-vpc.cn-shanghai.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:server-20251127152426
           imagePullPolicy: IfNotPresent
           env:
             - name: aliyun_logs_wisland-feed-dev-server
@@ -74,7 +75,7 @@ spec:
               subPath: .env
 
         - name: wisland-feed-dev-worker
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:worker-20251127152426
+          image: atom-sh-registry-vpc.cn-shanghai.cr.aliyuncs.com/mxrag-dev/wisland-feed-dev:worker-20251127152426
           imagePullPolicy: IfNotPresent
           env:
             - name: aliyun_logs_wisland-feed-dev-worker

@@ -17,6 +17,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
   cancel-in-progress: true
 
+# 上海企业版 ACR：REPO_PUB 推送、REPO_VPC 拉取；清单双 imagePullSecret
 env:
   KUBECTL_VERSION: v1.32.2
   NAMESPACE: shprod
@@ -24,7 +25,8 @@ env:
   REPO_APP: wisland-feed-prod
   DEPLOYMENT: wisland-feed-prod
 
-  REPO: ${{ secrets.ALI_DOCKER_REGISTRY }}
+  REPO_PUB: ${{ secrets.ALICLOUD_ACR_SH_EE_PUBLIC }}
+  REPO_VPC: ${{ secrets.ALICLOUD_ACR_SH_EE_VPC }}
   REPO_USER: ${{ secrets.ALI_DOCKER_REGISTRY_USERNAME_PENGHAO }}
   REPO_PASSWD: ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }}
   FEISHU_WEBHOOK_URL_PROD_SH: ${{ secrets.FEISHU_WEBHOOK_URL_PROD_SH }}
@@ -111,8 +113,8 @@ jobs:
       - name: Update
         run: |
           kubectl -n "${{ env.NAMESPACE }}" set image deployment/${{ env.DEPLOYMENT }} \
-            ${{ env.DEPLOYMENT }}-server=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ needs.get_tag.outputs.docker_tag }} \
-            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ needs.get_tag.outputs.docker_tag }}
+            ${{ env.DEPLOYMENT }}-server=${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ needs.get_tag.outputs.docker_tag }} \
+            ${{ env.DEPLOYMENT }}-worker=${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ needs.get_tag.outputs.docker_tag }}
           kubectl -n "${{ env.NAMESPACE }}" rollout status deployment/${{ env.DEPLOYMENT }} --timeout=600s
 
   delete_canary:
@@ -148,7 +150,7 @@ jobs:
         id: notify
         run: |
           BASE="分支: ${{ github.ref_name }}\n提交: ${{ github.sha }}"
-          REPO="${{ env.REPO }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}"
+          REPO="${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}"
           RUN_LINK="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           
           if [ "${{ github.event.inputs.approve }}" == "发布" ]; then

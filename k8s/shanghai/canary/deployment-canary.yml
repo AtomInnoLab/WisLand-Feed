@@ -17,9 +17,10 @@ spec:
     spec:
       imagePullSecrets:
         - name: registry-ali-hangzhou
+        - name: registry-ali-sh-ee
       containers:
         - name: wisland-feed-prod-canary-server
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20250920142148
+          image: atom-sh-registry-vpc.cn-shanghai.cr.aliyuncs.com/mxrag/wisland-feed-prod:server-20250920142148
           imagePullPolicy: IfNotPresent
           env:
             - name: ENVIRONMENT
@@ -63,7 +64,7 @@ spec:
             failureThreshold: 3
 
         - name: wisland-feed-prod-canary-worker
-          image: crpi-hytqalx0cm8oqxr4.cn-hangzhou.personal.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20250920142148
+          image: atom-sh-registry-vpc.cn-shanghai.cr.aliyuncs.com/mxrag/wisland-feed-prod:worker-20250920142148
           imagePullPolicy: IfNotPresent
           env:
             - name: ENVIRONMENT
