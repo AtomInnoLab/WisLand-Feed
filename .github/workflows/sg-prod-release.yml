@@ -1,4 +1,4 @@
-name: wisland-feed-prod-release
+name: sg-prod-release
 
 on:
   workflow_dispatch:
@@ -48,7 +48,7 @@ jobs:
         id: get_docker_tag
         uses: ./.github/actions/get-docker-tag
         with:
-          workflow: wisland-feed-prod-canary.yml
+          workflow: sg-prod-canary.yml
           repository: ${{ github.repository }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
     outputs:
@@ -92,7 +92,7 @@ jobs:
           kubectl -n "${{ env.NAMESPACE }}" rollout status deployment/${{ env.DEPLOYMENT }} --timeout=180s
 
       - name: Delete canary resources
-        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/canary/ --ignore-not-found=true
+        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/singapore/sg-canary/ --ignore-not-found=true
 
       - name: Notify Feishu - release
         uses: ./.github/actions/send-feishu-v2
@@ -121,7 +121,7 @@ jobs:
           kubectl-version: ${{ env.KUBECTL_VERSION }}
           kubeconfig-env: ${{ env.KUBECONFIG_PROD }}
       - name: Delete canary resources
-        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/canary/ --ignore-not-found=true
+        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/singapore/sg-canary/ --ignore-not-found=true
 
   notify:
     name: notify
@@ -155,7 +155,7 @@ jobs:
               fi
             fi
           elif [ "${{ github.event.inputs.approve }}" == "取消" ]; then
-            if [ "${{ needs.delete_canary.result }}" == "success" ]; then
+            if [ "${{ needs.delete_canary.result }}" == "success" ] || [ "${{ needs.delete_canary.result }}" == "skipped" ]; then
               EMOJI="🔵" TITLE="ACK: ${{ env.DEPLOYMENT }} - cancelled"
               DETAILS="${BASE}"
             else

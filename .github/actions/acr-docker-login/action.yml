@@ -24,7 +24,7 @@ runs:
     - name: Install Aliyun CLI and jq
       shell: bash
       run: |
-        sudo apt-get update -qq && sudo apt-get install -y jq curl
+        sudo apt-get update -qq && sudo apt-get install -y jq curl retry
         ARCH=$(dpkg --print-architecture)
         if [ "$ARCH" = "amd64" ]; then
           curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz -o aliyun.tgz
@@ -63,6 +63,5 @@ runs:
         HOST="$REGISTRY_URL"
         HOST="${HOST#https://}"
         HOST="${HOST#http://}"
-        echo "$TOKEN" | docker login -u "$USER" --password-stdin "$HOST"
+        echo "$TOKEN" | retry -t 5 -d 5 -- docker login -u "$USER" --password-stdin "$HOST"
         echo "Docker logged in to ACR Enterprise"
-
