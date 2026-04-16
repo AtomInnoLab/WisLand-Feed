@@ -133,7 +133,7 @@ jobs:
           kubectl-version: ${{ env.KUBECTL_VERSION }}
           kubeconfig-env: ${{ env.KUBECONFIG_PROD_SH }}
       - name: Delete canary resources
-        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/shanghai/canary/ --ignore-not-found=true
+        run: kubectl -n "${{ env.NAMESPACE }}" delete -f k8s/shanghai/sh-canary/ --ignore-not-found=true
 
   notify:
     name: notify

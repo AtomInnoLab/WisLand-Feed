@@ -109,13 +109,13 @@ jobs:
           WORKER_IMAGE="${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ needs.build_and_push.outputs.docker_tag }}"
           kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary --ignore-not-found=true
           kubectl -n "${{ env.NAMESPACE }}" set image \
-            -f k8s/shanghai/canary/deployment-canary.yml \
+            -f k8s/shanghai/sh-canary/deployment-canary.yml \
             ${{ env.DEPLOYMENT }}-canary-server="$SERVER_IMAGE" \
             ${{ env.DEPLOYMENT }}-canary-worker="$WORKER_IMAGE" \
             --local -o yaml \
           | kubectl -n "${{ env.NAMESPACE }}" apply -f - --validate=false
-          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/shanghai/canary/service-canary.yml --validate=false
-          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/shanghai/canary/ingress-canary.yaml --validate=false
+          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/shanghai/sh-canary/service-canary.yml --validate=false
+          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/shanghai/sh-canary/ingress-canary.yaml --validate=false
           kubectl -n "${{ env.NAMESPACE }}" rollout status "deployment/${{ env.DEPLOYMENT }}-canary" --timeout=600s
 
       - name: Save docker_tag to artifact
