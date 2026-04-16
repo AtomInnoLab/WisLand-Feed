@@ -4,7 +4,7 @@ inputs:
   workflow:
     description: 'Workflow file name to query'
     required: false
-    default: 'prod-canary.yml'
+    default: 'sg-prod-canary.yml'
   repository:
     description: 'Repository to query (owner/repo)'
     required: true
@@ -34,20 +34,20 @@ runs:
         REPOSITORY: ${{ inputs.repository }}
       run: |
         RUN_JSON=$(gh run list --repo "$REPOSITORY" --workflow="$WORKFLOW" --status=success --limit=1 --json databaseId,url)
-
+        
         if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "[]" ]; then
           echo "❌ 未找到成功的 canary workflow 运行记录"
           exit 1
         fi
-
+        
         RUN_ID=$(echo "$RUN_JSON" | jq -r '.[0].databaseId')
         RUN_URL=$(echo "$RUN_JSON" | jq -r '.[0].url')
-
+        
         if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
           echo "❌ 无法解析 workflow run ID"
           exit 1
         fi
-
+        
         echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
         echo "run_url=$RUN_URL" >> $GITHUB_OUTPUT
 
@@ -65,12 +65,12 @@ runs:
       shell: bash
       run: |
         DOCKER_TAG=$(cat docker_tag.txt | tr -d '\n\r')
-
+        
         if [ -z "$DOCKER_TAG" ]; then
           echo "❌ docker_tag 为空"
           exit 1
         fi
-
+        
         echo "docker_tag=$DOCKER_TAG" >> $GITHUB_OUTPUT
         echo "run_id=${{ steps.get_run_id.outputs.run_id }}" >> $GITHUB_OUTPUT
         echo "run_url=${{ steps.get_run_id.outputs.run_url }}" >> $GITHUB_OUTPUT

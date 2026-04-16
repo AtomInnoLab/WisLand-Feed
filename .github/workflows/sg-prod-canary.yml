@@ -1,4 +1,4 @@
-name: wisland-feed-prod-canary
+name: sg-prod-canary
 
 on:
   pull_request_target:
@@ -118,13 +118,13 @@ jobs:
           IMAGE_WORKER="${{ env.REPO_VPC }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ needs.build_and_push.outputs.docker_tag }}"
           kubectl -n "${{ env.NAMESPACE }}" delete deployment ${{ env.DEPLOYMENT }}-canary --ignore-not-found=true
           kubectl -n "${{ env.NAMESPACE }}" set image \
-            -f k8s/canary/deployment-canary.yml \
+            -f k8s/singapore/sg-canary/deployment-canary.yml \
             ${{ env.DEPLOYMENT }}-canary-server="$IMAGE_SERVER" \
             ${{ env.DEPLOYMENT }}-canary-worker="$IMAGE_WORKER" \
             --local -o yaml \
           | kubectl -n "${{ env.NAMESPACE }}" apply -f - --validate=false
-          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/canary/service-canary.yml --validate=false
-          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/canary/ingress-canary.yaml --validate=false
+          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/singapore/sg-canary/service-canary.yml --validate=false
+          kubectl -n "${{ env.NAMESPACE }}" apply -f k8s/singapore/sg-canary/ingress-canary.yaml --validate=false
           kubectl -n "${{ env.NAMESPACE }}" rollout status "deployment/${{ env.DEPLOYMENT }}-canary" --timeout=180s
 
       - name: Save docker_tag to artifact
@@ -158,7 +158,7 @@ jobs:
             测试方法：在header 中添加 X-Canary: grey
             测试地址: https://wisland-feed-canary.atominnolab.com
 
-            🚀 生产发布: https://github.com/${{ github.repository }}/actions/workflows/wisland-feed-prod-release.yml
+            🚀 生产发布: https://github.com/${{ github.repository }}/actions/workflows/sg-prod-release.yml
 
   notify_docker_tag_mismatch:
     name: notify_docker_tag_mismatch
