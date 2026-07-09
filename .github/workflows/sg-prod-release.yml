@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
@@ -63,7 +63,7 @@ jobs:
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
@@ -112,7 +112,7 @@ jobs:
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
       - name: Setup kubectl
@@ -130,7 +130,7 @@ jobs:
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
