@@ -1,0 +1,27 @@
+# PR 关闭后清理 GitHub Actions cache，避免单仓 10GB 配额写满。
+# 1. 删除 refs/pull/<n>/merge 分支 scope 的 cache
+# 2. 若仓库总量仍 > 8GB，按 last_accessed_at 从旧到新删至 8GB 以下
+name: cache-pr-close
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [dev, pre, main]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Cleanup caches on PR close
+        # gh 使用 GH_TOKEN（= github.token），无需单独 gh auth login；需 permissions.actions: write
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THRESHOLD_GB: "8"
+        run: bash .github/scripts/cache-pr-close.sh "${{ github.event.pull_request.number }}"

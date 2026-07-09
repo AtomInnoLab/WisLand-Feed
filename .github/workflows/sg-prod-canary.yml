@@ -33,7 +33,7 @@ jobs:
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
@@ -101,7 +101,7 @@ jobs:
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
@@ -132,7 +132,7 @@ jobs:
           echo "${{ needs.build_and_push.outputs.docker_tag }}" > docker_tag.txt
 
       - name: Upload docker_tag artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: docker_tag
           path: docker_tag.txt
@@ -167,7 +167,7 @@ jobs:
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
