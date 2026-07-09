@@ -4,6 +4,8 @@ on:
     branches: [pre]
     types: [closed]
   workflow_dispatch:
+    branches:
+      - pre
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.base.ref || github.ref_name }}
