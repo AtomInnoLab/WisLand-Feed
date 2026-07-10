@@ -1,0 +1,119 @@
+name: Log in to Aliyun ACR (cached Aliyun CLI)
+description: >-
+  Cache aliyun-cli .tgz with actions/cache; install jq/curl + aliyun CLI; ACR token + docker login; verify.
+inputs:
+  access-key-id:
+    description: Alibaba Cloud AccessKey ID
+    required: true
+  secret-access-key:
+    description: Alibaba Cloud AccessKey Secret
+    required: true
+  instance-id:
+    description: ACR EE instance ID (e.g. cri-xxx)
+    required: true
+  registry-url:
+    description: Registry host or URL (with or without https://)
+    required: true
+  region-id:
+    description: CR region (must match instance)
+    required: false
+    default: 'ap-southeast-1'
+  aliyun-cli-version:
+    description: aliyun-cli version without v prefix (e.g. 3.3.7)
+    required: false
+    default: '3.3.7'
+  aliyun-cli-download-url-amd64:
+    description: Optional Linux amd64 .tgz URL (default GitHub Releases)
+    required: false
+    default: ''
+  aliyun-cli-download-url-arm64:
+    description: Optional Linux arm64 .tgz URL
+    required: false
+    default: ''
+  cache-key-prefix:
+    description: Optional cache key segment; default github.repository_owner
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Cache aliyun-cli tarball
+      uses: actions/cache@v5
+      with:
+        path: /tmp/aliyun-cli.tgz
+        key: aliyun-cli-${{ inputs.cache-key-prefix || github.repository_owner }}-${{ runner.os }}-${{ runner.arch }}-v${{ inputs.aliyun-cli-version }}-${{ (inputs.aliyun-cli-download-url-amd64 != '' || inputs.aliyun-cli-download-url-arm64 != '') && 'mirror' || 'upstream' }}
+        restore-keys: |
+          aliyun-cli-${{ inputs.cache-key-prefix || github.repository_owner }}-${{ runner.os }}-${{ runner.arch }}-v
+
+    - name: Install jq curl and Aliyun CLI
+      shell: bash
+      env:
+        V: ${{ inputs.aliyun-cli-version }}
+        U_AMD64: ${{ inputs.aliyun-cli-download-url-amd64 }}
+        U_ARM64: ${{ inputs.aliyun-cli-download-url-arm64 }}
+      run: |
+        set -euo pipefail
+        if ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+          sudo apt-get update -qq && sudo apt-get install -y jq curl
+        fi
+
+        arch=$(dpkg --print-architecture)
+        case "$arch" in
+          amd64) url=${U_AMD64:-}; suf=amd64 ;;
+          arm64) url=${U_ARM64:-}; suf=arm64 ;;
+          *) echo "::error::Unsupported architecture: $arch"; exit 1 ;;
+        esac
+        url=${url:-https://github.com/aliyun/aliyun-cli/releases/download/v${V}/aliyun-cli-linux-${V}-${suf}.tgz}
+
+        if [ ! -s /tmp/aliyun-cli.tgz ]; then
+          curl -fsSL "$url" -o /tmp/aliyun-cli.tgz
+        fi
+        tar xzf /tmp/aliyun-cli.tgz
+        sudo mv aliyun /usr/local/bin/
+        aliyun version
+
+    - name: ACR token, docker login, verify
+      shell: bash
+      env:
+        ALIYUN_AK: ${{ inputs.access-key-id }}
+        ALIYUN_SK: ${{ inputs.secret-access-key }}
+        ACR_INSTANCE_ID: ${{ inputs.instance-id }}
+        REGION_ID: ${{ inputs.region-id }}
+        ACR_ENDPOINT: cr.${{ inputs.region-id }}.aliyuncs.com
+        REGISTRY_URL: ${{ inputs.registry-url }}
+      run: |
+        set -euo pipefail
+        host="${REGISTRY_URL#https://}"
+        host="${host#http://}"
+        [ -n "$REGION_ID" ] || { echo "::error::region-id is empty"; exit 1; }
+
+        set +e
+        resp=$(aliyun cr GetAuthorizationToken \
+          --endpoint "$ACR_ENDPOINT" \
+          --region "$REGION_ID" \
+          --InstanceId "$ACR_INSTANCE_ID" \
+          --access-key-id "$ALIYUN_AK" \
+          --access-key-secret "$ALIYUN_SK" 2>&1)
+        code=$?
+        set -e
+        [ -n "$resp" ] || { echo "::error::GetAuthorizationToken empty (exit $code)"; exit 1; }
+        if ! echo "$resp" | jq -e . >/dev/null 2>&1; then
+          echo "::error::GetAuthorizationToken non-JSON (exit $code): $resp"
+          exit 1
+        fi
+
+        token=$(echo "$resp" | jq -r '.AuthorizationToken // empty')
+        temp_user=$(echo "$resp" | jq -r '.TempUsername // empty')
+        [ -n "$token" ] && [ "$token" != "null" ] || { echo "::error::No AuthorizationToken: $resp"; exit 1; }
+        user="${temp_user:-temp_user_cr}"
+
+        for i in $(seq 5); do
+          echo "$token" | docker login -u "$user" --password-stdin "$host" && break
+          [ "$i" -eq 5 ] && { echo "::error::docker login failed after 5 attempts"; exit 1; }
+          sleep 5
+        done
+
+        aliyun version
+        [ -f "$HOME/.docker/config.json" ] || { echo "::error::Missing ~/.docker/config.json"; exit 1; }
+        grep -Fq "$host" "$HOME/.docker/config.json" || { echo "::error::Registry not in docker config: $host"; exit 1; }
