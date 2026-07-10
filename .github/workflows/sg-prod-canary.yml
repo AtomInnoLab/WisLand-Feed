@@ -30,6 +30,7 @@ jobs:
     name: build_and_push
     permissions:
       contents: write
+      actions: read
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout
@@ -67,13 +68,8 @@ jobs:
             -p ${{ secrets.ALI_DOCKER_REGISTRY_PASSWD_PENGHAO }} \
             ${{ secrets.ALI_DOCKER_REGISTRY }}
 
-      - name: Build Docker images
-        run: |
-          docker build --build-arg APP_PROFILE=prod -f Dockerfile.server -t ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }} .
-          docker build --build-arg APP_PROFILE=prod -f Dockerfile.worker -t ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }} .
-
-      - name: Log in to Aliyun ACR (Singapore)
-        uses: ./.github/actions/acr-docker-login
+      - name: Log in to Aliyun ACR (cached)
+        uses: ./.github/actions/get-acr-token
         with:
           access-key-id: ${{ secrets.ALICLOUD_ACCESS_KEY_PH }}
           secret-access-key: ${{ secrets.ALICLOUD_SECRET_KEY_PH }}
@@ -81,11 +77,33 @@ jobs:
           registry-url: ${{ secrets.ALICLOUD_ACR_SP_PUBLIC }}
           region-id: ${{ env.REGION_ID }}
 
-      - name: Push Docker images
-        run: |
-          sudo apt-get update && sudo apt-get install -y retry
-          retry -t 5 -- docker push ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }}
-          retry -t 5 -- docker push ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push server image (with layer cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.server
+          push: true
+          tags: ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:server-${{ env.DOCKER_TAG }}
+          build-args: |
+            APP_PROFILE=prod
+          cache-from: type=gha,scope=wisland-feed-prod-server
+          cache-to: type=gha,mode=min,scope=wisland-feed-prod-server,ignore-error=true
+
+      - name: Build and push worker image (with layer cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.DEPLOYMENT }}:worker-${{ env.DOCKER_TAG }}
+          build-args: |
+            APP_PROFILE=prod
+          cache-from: type=gha,scope=wisland-feed-prod-worker
+          cache-to: type=gha,mode=min,scope=wisland-feed-prod-worker,ignore-error=true
+
 
       - name: Set DOCKER_TAG_SERVER and DOCKER_TAG_WORKER for next job
         run: |
@@ -98,6 +116,7 @@ jobs:
     name: deploy_canary
     permissions:
       contents: write
+      actions: read
     runs-on: [ubuntu-22.04]
     steps:
       - name: Checkout

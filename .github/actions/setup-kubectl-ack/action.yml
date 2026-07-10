@@ -1,19 +1,34 @@
 # .github/actions/setup-kubectl-ack/action.yml
-name: Setup kubectl for ACK
-description: Install kubectl and configure kubeconfig from secrets
+# Drop-in：inputs 与旧版一致；内部对齐 k8s-template setup-kubectl（actions/cache + verify）。
+name: Setup kubectl for ACK (cached)
+description: >-
+  Cache kubectl install dir (runner tool cache), install, apply base64 kubeconfig, verify client and cluster access.
 inputs:
   kubectl-version:
     description: 'Kubernetes version, e.g. v1.32.2'
     required: true
     default: 'v1.32.2'
   kubeconfig-env:
-    description: 'dev or prod'
+    description: 'base64-encoded kubeconfig content written to ~/.kube/config'
     required: true
+    default: ''
+  cache-key-prefix:
+    description: Optional segment for cache key; default github.repository_owner
+    required: false
     default: ''
 
 runs:
-  using: "composite"
+  using: composite
   steps:
+    - name: Cache kubectl install dir
+      uses: actions/cache@v5
+      id: kubectl-tool-cache
+      with:
+        path: ${{ runner.tool_cache }}/kubectl
+        key: kubectl-${{ inputs.cache-key-prefix || github.repository_owner }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.kubectl-version }}
+        restore-keys: |
+          kubectl-${{ inputs.cache-key-prefix || github.repository_owner }}-${{ runner.os }}-${{ runner.arch }}-
+
     - name: Install kubectl
       uses: azure/setup-kubectl@v5
       with:
@@ -22,9 +37,22 @@ runs:
     - name: Configure Kubeconfig
       shell: bash
       run: |
+        set -euo pipefail
         mkdir -p ~/.kube
         echo "${{ inputs.kubeconfig-env }}" | base64 -d > ~/.kube/config
         chmod 600 ~/.kube/config
-        echo "✅ kubectl configured for namespace $NAMESPACE"
+        echo "kubectl configured for namespace $NAMESPACE"
       env:
         NAMESPACE: ${{ env.NAMESPACE }}
+
+    - name: Verify kubectl and cluster
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v kubectl >/dev/null 2>&1; then
+          echo "::error::kubectl not on PATH"
+          exit 1
+        fi
+        kubectl version --client
+        kubectl config current-context
+        echo "kubectl OK (client + cluster-auth)"
