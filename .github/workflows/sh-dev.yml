@@ -28,6 +28,7 @@ jobs:
     name: build_and_push
     permissions:
       contents: write
+      actions: read
     runs-on: [ubuntu-22.04]
     steps:
       - uses: actions/checkout@v5
@@ -65,13 +66,35 @@ jobs:
             -p ${{ env.REPO_PASSWD }} \
             ${{ env.REPO_PUB }}
 
-      - name: Build and Push Docker Image
-        run: |
-          sudo apt-get update && sudo apt-get install -y retry
-          docker build --build-arg APP_PROFILE=dev -f Dockerfile.server -t ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }} --platform=linux/amd64 .
-          docker build --build-arg APP_PROFILE=dev -f Dockerfile.worker -t ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }} --platform=linux/amd64 .
-          retry -t 5 -- docker push ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }}
-          retry -t 5 -- docker push ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push server image (with layer cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.server
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:server-${{ env.DOCKER_TAG }}
+          build-args: |
+            APP_PROFILE=dev
+          cache-from: type=gha,scope=wisland-feed-dev-server
+          cache-to: type=gha,mode=min,scope=wisland-feed-dev-server,ignore-error=true
+
+      - name: Build and push worker image (with layer cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.REPO_PUB }}/${{ env.REPO_NS }}/${{ env.REPO_APP }}:worker-${{ env.DOCKER_TAG }}
+          build-args: |
+            APP_PROFILE=dev
+          cache-from: type=gha,scope=wisland-feed-dev-worker
+          cache-to: type=gha,mode=min,scope=wisland-feed-dev-worker,ignore-error=true
+
 
       - name: Setup kubectl
         uses: ./.github/actions/setup-kubectl-ack
